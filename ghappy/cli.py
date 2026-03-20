@@ -118,15 +118,20 @@ def cli():
 
 
 @cli.command("watch-pr-checks")
-@click.option("--interval", default=10, help="Refresh interval in seconds.", show_default=True)
+@click.option("--interval", default=10, help="Poll interval in seconds.", show_default=True)
 def watch_pr_checks(interval: int):
-    """Watch PR check runs until they complete."""
+    """Watch PR check runs until they complete.
+
+    Prints each status change as a new line (agent-friendly, no terminal rewriting).
+    """
     repo = _detect_repo()
     branch = _detect_branch()
     owner, repo_name = repo.split("/", 1)
 
     click.echo(f"Watching checks for {repo} @ {branch}...")
-    click.echo()
+
+    # Track last-known status per check run name
+    prev_status: dict[str, str] = {}
 
     while True:
         data = _api_get(f"/repos/{owner}/{repo_name}/check-runs", params={"ref": branch})
@@ -136,38 +141,26 @@ def watch_pr_checks(interval: int):
             click.echo("No check runs found.")
             return
 
-        # Calculate column widths
-        name_width = max(len(r["name"]) for r in runs)
-        name_width = max(name_width, 4)  # min width for "NAME"
-
-        # Build output
-        lines = []
         any_pending = False
         any_failed = False
 
         for run in sorted(runs, key=lambda r: r["name"]):
             symbol, status_text = _status_symbol(run["status"], run["conclusion"])
             run_id = str(run["id"])
+            name = run["name"]
+
+            # Build a status key to detect changes
+            current = f"{status_text}"
+            previous = prev_status.get(name)
+
+            if previous != current:
+                click.echo(f"{symbol} {name}\t{status_text}\t(run {run_id})")
+                prev_status[name] = current
 
             if run["status"] != "completed":
                 any_pending = True
             if run.get("conclusion") == "failure":
                 any_failed = True
-
-            lines.append((symbol, run["name"], status_text, run_id))
-
-        # Determine column widths
-        status_width = max(len(line[2]) for line in lines)
-        status_width = max(status_width, 6)  # min width for "STATUS"
-
-        # Print header
-        header = f"{'NAME':<{name_width}}\t{'STATUS':<{status_width}}\tRUN ID"
-        click.echo(header)
-
-        # Print rows
-        for symbol, name, status_text, run_id in lines:
-            row = f"{name:<{name_width}}\t{symbol} {status_text:<{status_width}}\t{run_id}"
-            click.echo(row)
 
         if not any_pending:
             click.echo()
@@ -179,10 +172,6 @@ def watch_pr_checks(interval: int):
             return
 
         time.sleep(interval)
-        # Clear previous output (move cursor up)
-        # +2 for header and blank line between refreshes
-        lines_to_clear = len(lines) + 1
-        click.echo(f"\033[{lines_to_clear}A\033[J", nl=False)
 
 
 @cli.command("view-run-failure")
