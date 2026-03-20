@@ -1,2 +1,2 @@
-# gappy
-A simple API for accessing gh pr stats and other things from within Claude Code for Web
+# ghappy
+A simple CLI and API for accessing gh pr stats and other things from within Claude Code for Web
