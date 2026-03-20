@@ -100,9 +100,7 @@ async def get_run_jobs(
     ]
 
 
-async def get_job_log(
-    github_token: str, owner: str, repo: str, job_id: int
-) -> str:
+async def get_job_log(github_token: str, owner: str, repo: str, job_id: int) -> str:
     """Download logs for a specific job.
 
     Returns the plain text log content.

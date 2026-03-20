@@ -40,10 +40,12 @@ def load_config(path: str | Path) -> Config:
 
     api_keys = []
     for entry in data.get("api_keys", []):
-        api_keys.append(ApiKeyEntry(
-            key=entry["key"],
-            github_token=entry["github_token"],
-            repos=entry.get("repos", []),
-        ))
+        api_keys.append(
+            ApiKeyEntry(
+                key=entry["key"],
+                github_token=entry["github_token"],
+                repos=entry.get("repos", []),
+            )
+        )
 
     return Config(api_keys=api_keys)

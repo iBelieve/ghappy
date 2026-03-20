@@ -88,7 +88,11 @@ def _api_get(path: str, params: dict | None = None) -> dict:
         click.echo("Error: API key not authorized for this repository", err=True)
         sys.exit(1)
     elif resp.status_code >= 400:
-        detail = resp.json().get("detail", resp.text) if resp.headers.get("content-type", "").startswith("application/json") else resp.text
+        detail = (
+            resp.json().get("detail", resp.text)
+            if resp.headers.get("content-type", "").startswith("application/json")
+            else resp.text
+        )
         click.echo(f"Error: API returned {resp.status_code}: {detail}", err=True)
         sys.exit(1)
 
@@ -109,7 +113,9 @@ def cli():
 
 
 @cli.command("watch-pr-checks")
-@click.option("--interval", default=10, help="Poll interval in seconds.", show_default=True)
+@click.option(
+    "--interval", default=10, help="Poll interval in seconds.", show_default=True
+)
 def watch_pr_checks(interval: int):
     """Watch PR check runs until they complete.
 
@@ -125,7 +131,9 @@ def watch_pr_checks(interval: int):
     prev_status: dict[str, str] = {}
 
     while True:
-        data = _api_get(f"/repos/{owner}/{repo_name}/check-runs", params={"ref": branch})
+        data = _api_get(
+            f"/repos/{owner}/{repo_name}/check-runs", params={"ref": branch}
+        )
         runs = data.get("check_runs", [])
 
         if not runs:
@@ -192,7 +200,9 @@ def view_run_failure(run_id: int):
         current_step = None
         for line in log_text.splitlines():
             # Detect step group markers: ##[group]Run <step>
-            group_match = re.match(r"\d{4}-\d{2}-\d{2}T[\d:.]+Z\s+##\[group\](.*)", line)
+            group_match = re.match(
+                r"\d{4}-\d{2}-\d{2}T[\d:.]+Z\s+##\[group\](.*)", line
+            )
             if group_match:
                 current_step = group_match.group(1).strip()
                 continue

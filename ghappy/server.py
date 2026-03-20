@@ -29,7 +29,9 @@ def _authenticate(request: Request, owner: str, repo: str) -> str:
     auth = request.headers.get("Authorization", "")
     match = re.match(r"Bearer\s+(.+)", auth)
     if not match:
-        raise HTTPException(status_code=401, detail="Missing or invalid Authorization header")
+        raise HTTPException(
+            status_code=401, detail="Missing or invalid Authorization header"
+        )
 
     api_key = match.group(1)
     config = get_config()
@@ -37,7 +39,9 @@ def _authenticate(request: Request, owner: str, repo: str) -> str:
     github_token = config.get_github_token(api_key, full_repo)
 
     if github_token is None:
-        raise HTTPException(status_code=403, detail="API key not authorized for this repository")
+        raise HTTPException(
+            status_code=403, detail="API key not authorized for this repository"
+        )
 
     return github_token
 
@@ -75,12 +79,14 @@ async def failed_logs(owner: str, repo: str, run_id: int, request: Request):
         except Exception:
             log_text = ""
 
-        logs.append({
-            "job_name": job["name"],
-            "job_id": job["id"],
-            "failed_steps": [s["name"] for s in failed_steps],
-            "log": log_text,
-        })
+        logs.append(
+            {
+                "job_name": job["name"],
+                "job_id": job["id"],
+                "failed_steps": [s["name"] for s in failed_steps],
+                "log": log_text,
+            }
+        )
 
     return JSONResponse(content={"logs": logs})
 
