@@ -28,7 +28,7 @@ Each API key is scoped to specific repos and uses its own GitHub token.
 Generate a secure API key with:
 
 ```bash
-python -c "import secrets; print(secrets.token_urlsafe(32))"
+openssl rand -hex 32
 ```
 
 ### Running
