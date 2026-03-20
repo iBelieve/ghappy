@@ -1,13 +1,16 @@
 """FastAPI server that proxies GitHub API requests."""
 
+import logging
 import os
 import re
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
 
-from .config import Config, load_config
 from . import github
+from .config import Config, load_config
+
+logger = logging.getLogger("ghappy")
 
 app = FastAPI(title="ghappy", description="GitHub API proxy")
 _config: Config | None = None
@@ -46,14 +49,24 @@ def _authenticate(request: Request, owner: str, repo: str) -> str:
     return github_token
 
 
+def _log_access(request: Request, owner: str, repo: str, endpoint: str) -> None:
+    """Log authenticated access to an endpoint."""
+    client = request.client.host if request.client else "unknown"
+    logger.info("%s %s/%s %s", endpoint, owner, repo, client)
+
+
 @app.get("/repos/{owner}/{repo}/check-runs")
 async def check_runs(owner: str, repo: str, ref: str, request: Request):
     """Get check runs for a git reference."""
     github_token = _authenticate(request, owner, repo)
+    _log_access(request, owner, repo, f"check-runs ref={ref}")
     try:
         runs = await github.get_check_runs(github_token, owner, repo, ref)
-    except Exception as e:
-        raise HTTPException(status_code=502, detail=f"GitHub API error: {e}")
+    except Exception:
+        logger.exception(
+            "GitHub API error fetching check runs for %s/%s ref=%s", owner, repo, ref
+        )
+        raise HTTPException(status_code=502, detail="GitHub API error")
     return JSONResponse(content={"check_runs": runs})
 
 
@@ -61,11 +74,15 @@ async def check_runs(owner: str, repo: str, ref: str, request: Request):
 async def failed_logs(owner: str, repo: str, run_id: int, request: Request):
     """Get failed job logs for a workflow run."""
     github_token = _authenticate(request, owner, repo)
+    _log_access(request, owner, repo, f"failed-logs run={run_id}")
 
     try:
         jobs = await github.get_run_jobs(github_token, owner, repo, run_id)
-    except Exception as e:
-        raise HTTPException(status_code=502, detail=f"GitHub API error: {e}")
+    except Exception:
+        logger.exception(
+            "GitHub API error fetching jobs for %s/%s run=%d", owner, repo, run_id
+        )
+        raise HTTPException(status_code=502, detail="GitHub API error")
 
     failed_jobs = [j for j in jobs if j["conclusion"] == "failure"]
     if not failed_jobs:
@@ -77,6 +94,9 @@ async def failed_logs(owner: str, repo: str, run_id: int, request: Request):
         try:
             log_text = await github.get_job_log(github_token, owner, repo, job["id"])
         except Exception:
+            logger.exception(
+                "GitHub API error fetching log for %s/%s job=%d", owner, repo, job["id"]
+            )
             log_text = ""
 
         logs.append(
@@ -95,6 +115,11 @@ def main():
     """Entry point for ghappy-server."""
     import uvicorn
 
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+    )
+
     host = os.environ.get("GHAPPY_HOST", "0.0.0.0")
     port = int(os.environ.get("GHAPPY_PORT", "8000"))
     config_path = os.environ.get("GHAPPY_CONFIG", "config.yaml")
@@ -102,8 +127,8 @@ def main():
     # Load config eagerly to fail fast on bad config
     global _config
     _config = load_config(config_path)
-    print(f"Loaded config from {config_path}")
-    print(f"Configured {len(_config.api_keys)} API key(s)")
+    logger.info("Loaded config from %s", config_path)
+    logger.info("Configured %d API key(s)", len(_config.api_keys))
 
     uvicorn.run(app, host=host, port=port)
 
