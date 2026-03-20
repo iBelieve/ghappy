@@ -95,20 +95,11 @@ def _api_get(path: str, params: dict | None = None) -> dict:
     return resp.json()
 
 
-def _status_symbol(status: str, conclusion: str | None) -> tuple[str, str]:
-    """Return (symbol, display_status) for a check run, matching gh CLI style."""
+def _display_status(status: str, conclusion: str | None) -> str:
+    """Return a display string for a check run's status."""
     if status != "completed":
-        return ("*", status)
-    if conclusion == "success":
-        return ("+", "pass")
-    elif conclusion == "failure":
-        return ("X", "fail")
-    elif conclusion == "cancelled":
-        return ("-", "cancelled")
-    elif conclusion == "skipped":
-        return ("-", "skipped")
-    else:
-        return ("-", conclusion or "unknown")
+        return status
+    return conclusion or "unknown"
 
 
 @click.group()
@@ -138,24 +129,21 @@ def watch_pr_checks(interval: int):
         runs = data.get("check_runs", [])
 
         if not runs:
-            click.echo("No check runs found.")
-            return
+            click.echo("No check runs found.", err=True)
+            sys.exit(1)
 
         any_pending = False
         any_failed = False
 
         for run in sorted(runs, key=lambda r: r["name"]):
-            symbol, status_text = _status_symbol(run["status"], run["conclusion"])
+            status_text = _display_status(run["status"], run["conclusion"])
             run_id = str(run["id"])
             name = run["name"]
 
-            # Build a status key to detect changes
-            current = f"{status_text}"
             previous = prev_status.get(name)
-
-            if previous != current:
-                click.echo(f"{symbol} {name}\t{status_text}\t(run {run_id})")
-                prev_status[name] = current
+            if previous != status_text:
+                click.echo(f"{name}\t{status_text}\t(run {run_id})")
+                prev_status[name] = status_text
 
             if run["status"] != "completed":
                 any_pending = True
