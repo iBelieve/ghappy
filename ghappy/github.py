@@ -3,6 +3,9 @@
 import httpx
 
 GITHUB_API = "https://api.github.com"
+REQUEST_TIMEOUT = 30
+MAX_PAGES = 10
+MAX_LOG_BYTES = 5 * 1024 * 1024  # 5 MB
 
 
 def _headers(github_token: str) -> dict[str, str]:
@@ -25,8 +28,8 @@ async def get_check_runs(
     all_runs = []
     page = 1
 
-    async with httpx.AsyncClient() as client:
-        while True:
+    async with httpx.AsyncClient(timeout=REQUEST_TIMEOUT) as client:
+        while page <= MAX_PAGES:
             resp = await client.get(
                 url,
                 headers=_headers(github_token),
@@ -65,8 +68,8 @@ async def get_run_jobs(
     all_jobs = []
     page = 1
 
-    async with httpx.AsyncClient() as client:
-        while True:
+    async with httpx.AsyncClient(timeout=REQUEST_TIMEOUT) as client:
+        while page <= MAX_PAGES:
             resp = await client.get(
                 url,
                 headers=_headers(github_token),
@@ -103,11 +106,22 @@ async def get_run_jobs(
 async def get_job_log(github_token: str, owner: str, repo: str, job_id: int) -> str:
     """Download logs for a specific job.
 
-    Returns the plain text log content.
+    Returns the plain text log content, truncated to MAX_LOG_BYTES.
     """
     url = f"{GITHUB_API}/repos/{owner}/{repo}/actions/jobs/{job_id}/logs"
 
-    async with httpx.AsyncClient(follow_redirects=True) as client:
-        resp = await client.get(url, headers=_headers(github_token))
-        resp.raise_for_status()
-        return resp.text
+    async with httpx.AsyncClient(
+        follow_redirects=True, timeout=REQUEST_TIMEOUT
+    ) as client:
+        async with client.stream("GET", url, headers=_headers(github_token)) as resp:
+            resp.raise_for_status()
+            chunks = []
+            total = 0
+            async for chunk in resp.aiter_bytes():
+                remaining = MAX_LOG_BYTES - total
+                if remaining <= 0:
+                    break
+                chunks.append(chunk[:remaining])
+                total += len(chunk[:remaining])
+
+    return b"".join(chunks).decode("utf-8", errors="replace")

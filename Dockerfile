@@ -10,6 +10,9 @@ RUN uv sync --no-dev --no-install-project
 COPY ghappy/ ghappy/
 RUN uv sync --no-dev
 
+RUN useradd -r -s /bin/false appuser
+USER appuser
+
 EXPOSE 8000
 
 CMD ["uv", "run", "ghappy-server"]

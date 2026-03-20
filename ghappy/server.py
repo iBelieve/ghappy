@@ -30,7 +30,7 @@ def _authenticate(request: Request, owner: str, repo: str) -> str:
     Raises HTTPException if unauthorized.
     """
     auth = request.headers.get("Authorization", "")
-    match = re.match(r"Bearer\s+(.+)", auth)
+    match = re.match(r"Bearer\s+([\w\-]{1,256})", auth)
     if not match:
         raise HTTPException(
             status_code=401, detail="Missing or invalid Authorization header"
@@ -49,10 +49,27 @@ def _authenticate(request: Request, owner: str, repo: str) -> str:
     return github_token
 
 
+def _get_client_ip(request: Request) -> str:
+    """Get the real client IP, respecting proxy headers."""
+    forwarded = (
+        request.headers.get("CF-Connecting-IP")
+        or request.headers.get("X-Forwarded-For", "").split(",")[0].strip()
+    )
+    if forwarded:
+        return forwarded
+    return request.client.host if request.client else "unknown"
+
+
 def _log_access(request: Request, owner: str, repo: str, endpoint: str) -> None:
     """Log authenticated access to an endpoint."""
-    client = request.client.host if request.client else "unknown"
+    client = _get_client_ip(request)
     logger.info("%s %s/%s %s", endpoint, owner, repo, client)
+
+
+@app.get("/health")
+async def health():
+    """Health check endpoint."""
+    return JSONResponse(content={"status": "ok"})
 
 
 @app.get("/repos/{owner}/{repo}/check-runs")
@@ -95,7 +112,10 @@ async def failed_logs(owner: str, repo: str, run_id: int, request: Request):
             log_text = await github.get_job_log(github_token, owner, repo, job["id"])
         except Exception:
             logger.exception(
-                "GitHub API error fetching log for %s/%s job=%d", owner, repo, job["id"]
+                "GitHub API error fetching log for %s/%s job=%d",
+                owner,
+                repo,
+                job["id"],
             )
             log_text = ""
 
@@ -130,7 +150,7 @@ def main():
     logger.info("Loaded config from %s", config_path)
     logger.info("Configured %d API key(s)", len(_config.api_keys))
 
-    uvicorn.run(app, host=host, port=port)
+    uvicorn.run(app, host=host, port=port, proxy_headers=True)
 
 
 if __name__ == "__main__":
