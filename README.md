@@ -31,7 +31,14 @@ Each API key is scoped to specific repos and uses its own GitHub token.
 uvx ghappy-server
 ```
 
-Environment variables:
+Or with Docker:
+
+```bash
+docker build -t ghappy .
+docker run -p 8000:8000 -v ./config.yaml:/app/config.yaml ghappy
+```
+
+### Environment variables
 
 | Variable | Default | Description |
 |---|---|---|
