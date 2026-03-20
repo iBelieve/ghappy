@@ -28,7 +28,7 @@ Each API key is scoped to specific repos and uses its own GitHub token.
 ### Running
 
 ```bash
-uvx ghappy-server
+uvx --from 'ghappy @ git+https://github.com/iBelieve/ghappy' ghappy-server
 ```
 
 Or with Docker:
@@ -64,17 +64,17 @@ The CLI auto-detects the repo and branch from your git remote.
 **Watch PR checks:**
 
 ```bash
-uvx ghappy watch-pr-checks
+uvx --from 'ghappy @ git+https://github.com/iBelieve/ghappy' ghappy watch-pr-checks
 ```
 
 Polls for check run status and prints a line whenever a check's status changes:
 
 ```
 Watching checks for owner/repo @ my-branch...
-* Build and Test	in_progress	(run 12345678)
-* Lint	queued	(run 12345679)
-+ Lint	pass	(run 12345679)
-+ Build and Test	pass	(run 12345678)
+Build and Test	in_progress	(run 12345678)
+Lint	queued	(run 12345679)
+Lint	success	(run 12345679)
+Build and Test	success	(run 12345678)
 
 All checks were successful
 ```
@@ -82,7 +82,7 @@ All checks were successful
 **View failed run logs:**
 
 ```bash
-uvx ghappy view-run-failure 12345678
+uvx --from 'ghappy @ git+https://github.com/iBelieve/ghappy' ghappy view-run-failure 12345678
 ```
 
 Shows failed job logs in `gh run view --log-failed` style:
