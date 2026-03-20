@@ -1,0 +1,23 @@
+[project]
+name = "ghappy"
+version = "0.1.0"
+description = "A CLI and API proxy for accessing GitHub PR checks and CI logs"
+readme = "README.md"
+license = "Apache-2.0"
+requires-python = ">=3.10"
+authors = [{name = "Michael Spencer"}]
+dependencies = [
+    "click",
+    "httpx",
+    "pyyaml",
+    "fastapi",
+    "uvicorn",
+]
+
+[project.scripts]
+ghappy = "ghappy.cli:cli"
+ghappy-server = "ghappy.server:main"
+
+[build-system]
+requires = ["setuptools"]
+build-backend = "setuptools.build_meta"
