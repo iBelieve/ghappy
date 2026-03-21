@@ -82,12 +82,21 @@ def _api_get(path: str, params: dict | None = None) -> dict:
     )
 
     if resp.status_code >= 400:
-        detail = (
-            resp.json().get("detail", resp.text)
-            if resp.headers.get("content-type", "").startswith("application/json")
-            else resp.text
-        )
+        detail = resp.text
+        permissions = None
+        if resp.headers.get("content-type", "").startswith("application/json"):
+            body = resp.json()
+            raw = body.get("detail", resp.text)
+            if isinstance(raw, dict):
+                detail = raw.get("detail", resp.text)
+                permissions = raw.get("accepted_permissions")
+            else:
+                detail = raw
         click.echo(f"Error: API returned {resp.status_code}: {detail}", err=True)
+        if permissions:
+            click.echo(
+                f"Required GitHub permissions: {permissions}", err=True
+            )
         sys.exit(1)
 
     return resp.json()

@@ -59,7 +59,14 @@ def _github_http_error(exc: httpx.HTTPStatusError) -> HTTPException:
             message = body.get("message", exc.response.reason_phrase)
         except Exception:
             message = exc.response.reason_phrase
-        return HTTPException(status_code=status, detail=f"GitHub: {message}")
+        detail: dict | str = f"GitHub: {message}"
+        permissions = exc.response.headers.get("X-Accepted-GitHub-Permissions")
+        if permissions:
+            detail = {
+                "detail": f"GitHub: {message}",
+                "accepted_permissions": permissions,
+            }
+        return HTTPException(status_code=status, detail=detail)
     return HTTPException(status_code=502, detail="GitHub API error")
 
 
