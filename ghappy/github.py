@@ -53,14 +53,18 @@ async def get_check_runs(
     current_runs = [r for r in workflow_runs if r["head_sha"] == latest_sha]
 
     # Fetch jobs for each workflow run and map to check-run format.
-    results = []
+    # Deduplicate by job name, keeping the entry from the newest run
+    # (highest run_id). Multiple workflow runs for the same commit can
+    # produce duplicate job names (e.g. re-runs or parallel triggers).
+    seen: dict[str, dict] = {}
     for wf_run in current_runs:
         run_id = wf_run["id"]
         jobs = await get_run_jobs(github_token, owner, repo, run_id)
         for job in jobs:
-            results.append(
-                {
-                    "name": job["name"],
+            name = job["name"]
+            if name not in seen or run_id > seen[name]["workflow_run_id"]:
+                seen[name] = {
+                    "name": name,
                     "status": job["status"],
                     "conclusion": job["conclusion"],
                     "id": job["id"],
@@ -69,8 +73,7 @@ async def get_check_runs(
                     "started_at": job.get("started_at"),
                     "completed_at": job.get("completed_at"),
                 }
-            )
-    return results
+    return list(seen.values())
 
 
 async def get_run_jobs(

@@ -154,6 +154,63 @@ class TestGetCheckRuns:
         assert result[0]["workflow_run_id"] == 200
 
     @pytest.mark.asyncio
+    async def test_deduplicates_jobs_by_name(self):
+        """When multiple workflow runs have the same job name, keep the newest."""
+        mock_response = MagicMock()
+        mock_response.raise_for_status = MagicMock()
+        mock_response.json.return_value = {
+            "workflow_runs": [
+                {"id": 300, "head_sha": "abc"},
+                {"id": 200, "head_sha": "abc"},
+            ]
+        }
+
+        def fake_get_run_jobs(_token, _owner, _repo, run_id):
+            if run_id == 300:
+                return [
+                    {
+                        "name": "Deploy to Preview Environment",
+                        "status": "completed",
+                        "conclusion": "skipped",
+                        "id": 10,
+                        "html_url": "",
+                        "started_at": None,
+                        "completed_at": None,
+                        "steps": [],
+                    }
+                ]
+            return [
+                {
+                    "name": "Deploy to Preview Environment",
+                    "status": "completed",
+                    "conclusion": "success",
+                    "id": 5,
+                    "html_url": "",
+                    "started_at": None,
+                    "completed_at": None,
+                    "steps": [],
+                }
+            ]
+
+        with (
+            patch("ghappy.github.httpx.AsyncClient") as mock_client_cls,
+            patch("ghappy.github.get_run_jobs", new_callable=AsyncMock, side_effect=fake_get_run_jobs),
+        ):
+            mock_client = AsyncMock()
+            mock_client_cls.return_value.__aenter__ = AsyncMock(
+                return_value=mock_client
+            )
+            mock_client_cls.return_value.__aexit__ = AsyncMock(return_value=False)
+            mock_client.get = AsyncMock(return_value=mock_response)
+
+            result = await get_check_runs("token", "owner", "repo", "main")
+
+        # Should have only one entry, from the newer run (id=300)
+        assert len(result) == 1
+        assert result[0]["workflow_run_id"] == 300
+        assert result[0]["conclusion"] == "skipped"
+
+    @pytest.mark.asyncio
     async def test_empty_workflow_runs(self):
         mock_response = MagicMock()
         mock_response.raise_for_status = MagicMock()
