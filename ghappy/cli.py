@@ -130,8 +130,18 @@ def watch_pr_checks(interval: int):
 
     click.echo(f"Watching checks for {repo} @ {branch}...")
 
+    # All possible status/conclusion values that GitHub can return.
+    all_statuses = [
+        "queued", "in_progress", "waiting", "pending", "requested",
+        "success", "failure", "cancelled", "skipped", "timed_out",
+        "action_required", "neutral", "stale",
+    ]
+    status_width = max(len(s) for s in all_statuses)
+
     # Track last-known status per check run name
     prev_status: dict[str, str] = {}
+    name_width: int = 0
+    header_printed = False
 
     while True:
         data = _api_get(
@@ -143,6 +153,16 @@ def watch_pr_checks(interval: int):
             click.echo("No check runs found.", err=True)
             sys.exit(1)
 
+        # On first poll, compute name column width and print header.
+        if not header_printed:
+            name_width = max(len(r["name"]) for r in runs)
+            name_width = max(name_width, len("CHECK"))
+            click.echo(
+                f"{'CHECK':<{name_width}}  {'STATUS':<{status_width}}  RUN"
+            )
+            click.echo(f"{'─' * name_width}  {'─' * status_width}  {'─' * 11}")
+            header_printed = True
+
         any_pending = False
         any_failed = False
 
@@ -153,7 +173,9 @@ def watch_pr_checks(interval: int):
 
             previous = prev_status.get(name)
             if previous != status_text:
-                click.echo(f"{name}\t{status_text}\t(run {run_id})")
+                click.echo(
+                    f"{name:<{name_width}}  {status_text:<{status_width}}  {run_id}"
+                )
                 prev_status[name] = status_text
 
             if run["status"] != "completed":
