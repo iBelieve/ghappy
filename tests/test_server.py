@@ -245,7 +245,7 @@ class TestGithubHttpError:
         result = _github_http_error(exc)
         assert result.status_code == 403
         assert isinstance(result.detail, dict)
-        assert result.detail["accepted_permissions"] == "actions:read"
+        assert result.detail.get("accepted_permissions") == "actions:read"
 
     def test_5xx_error(self):
         mock_request = httpx.Request("GET", "https://api.github.com/test")
@@ -275,7 +275,7 @@ class TestGetClientIp:
         assert _get_client_ip(request) == "unknown"
 
 
-def _make_request(headers=None, client_host="127.0.0.1"):
+def _make_request(headers=None, client_host: str | None = "127.0.0.1"):
     """Create a minimal mock Request."""
     from unittest.mock import MagicMock
 
