@@ -219,6 +219,34 @@ class TestViewRunFailure:
         assert result.exit_code == 0
         assert "##[error]Process completed with exit code 1." in result.output
 
+    def test_step_name_mismatch_still_shows_logs(self):
+        """When API step names don't match ##[group] markers, logs should still appear."""
+        runner = CliRunner()
+        log_text = (
+            "2024-01-01T00:00:00.000Z ##[group]Run git push dokku HEAD:refs/heads/master --force\n"
+            "2024-01-01T00:00:01.000Z remote: Deploying app...\n"
+            "2024-01-01T00:00:02.000Z ##[error]Process completed with exit code 1.\n"
+        )
+        data = {
+            "logs": [
+                {
+                    "job_name": "deploy",
+                    # API step name differs from the ##[group] marker text
+                    "failed_steps": ["Deploy preview"],
+                    "log": log_text,
+                }
+            ]
+        }
+        with (
+            patch("ghappy.cli._detect_repo", return_value="owner/repo"),
+            patch("ghappy.cli._api_get", return_value=data),
+        ):
+            result = runner.invoke(cli, ["view-run-failure", "123"])
+
+        assert result.exit_code == 0
+        assert "remote: Deploying app..." in result.output
+        assert "##[error]Process completed with exit code 1." in result.output
+
     def test_no_logs_available(self):
         runner = CliRunner()
         data = {

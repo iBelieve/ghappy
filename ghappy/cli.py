@@ -226,12 +226,15 @@ def view_run_failure(run_id: int):
                 click.echo(f"{job_name}\t{step_name}\t(no logs available)")
             continue
 
-        # Parse log lines and filter to failed steps
+        # Parse log lines and output with step labels.
         # GitHub Actions log format: YYYY-MM-DDTHH:MM:SS.nnnnnnnZ <message>
-        # The log is divided into sections by step, with group markers
+        # The log is divided into sections by ##[group] markers. Note: the
+        # group marker text does NOT match the step name from the API (the
+        # API uses the workflow YAML `name:` while logs use the expanded
+        # command or action path), so we don't filter by step name here.
         current_step = None
         for line in log_text.splitlines():
-            # Detect step group markers: ##[group]Run <step>
+            # Detect step group markers to track which step we're in
             group_match = re.match(
                 r"\d{4}-\d{2}-\d{2}T[\d:.]+Z\s+##\[group\](.*)", line
             )
@@ -239,11 +242,7 @@ def view_run_failure(run_id: int):
                 current_step = group_match.group(1).strip()
                 continue
 
-            # Skip non-failed steps if we know the failed ones
-            if failed_steps and current_step and current_step not in failed_steps:
-                continue
-
-            # Print log lines for failed steps with job/step prefix
+            # Print log lines with job/step prefix
             timestamp_match = re.match(r"(\d{4}-\d{2}-\d{2}T[\d:.]+Z)\s+(.*)", line)
             if timestamp_match:
                 timestamp = timestamp_match.group(1)
