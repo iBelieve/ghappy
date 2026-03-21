@@ -132,21 +132,23 @@ async def failed_logs(owner: str, repo: str, run_id: int, request: Request):
         )
         raise HTTPException(status_code=502, detail="GitHub API error")
 
-    failed_jobs = [
-        j for j in jobs if j["conclusion"] in ("failure", "cancelled")
-    ]
+    failed_jobs = [j for j in jobs if j["conclusion"] == "failure"]
     if not failed_jobs:
         return JSONResponse(content={"logs": [], "message": "No failed jobs found"})
 
     logs = []
     for job in failed_jobs:
-        failed_steps = [
-            s
-            for s in job["steps"]
-            if s["conclusion"] in ("failure", "cancelled")
-        ]
+        failed_steps = [s for s in job["steps"] if s["conclusion"] == "failure"]
         try:
             log_text = await github.get_job_log(github_token, owner, repo, job["id"])
+        except httpx.HTTPStatusError as exc:
+            logger.exception(
+                "GitHub API error fetching log for %s/%s job=%d",
+                owner,
+                repo,
+                job["id"],
+            )
+            raise _github_http_error(exc)
         except Exception:
             logger.exception(
                 "GitHub API error fetching log for %s/%s job=%d",
