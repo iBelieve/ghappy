@@ -248,8 +248,10 @@ def view_run_failure(run_id: int):
             if timestamp_match:
                 timestamp = timestamp_match.group(1)
                 message = timestamp_match.group(2)
-                # Skip group markers in output
-                if message.startswith("##["):
+                # Skip group/endgroup markers but keep error/warning annotations
+                if message.startswith("##[group]") or message.startswith(
+                    "##[endgroup]"
+                ):
                     continue
                 step_label = current_step or "UNKNOWN STEP"
                 click.echo(f"{job_name}\t{step_label}\t{timestamp} {message}")
