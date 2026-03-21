@@ -4,6 +4,7 @@ import logging
 import os
 import re
 
+import httpx
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
 
@@ -49,6 +50,19 @@ def _authenticate(request: Request, owner: str, repo: str) -> str:
     return github_token
 
 
+def _github_http_error(exc: httpx.HTTPStatusError) -> HTTPException:
+    """Convert a GitHub HTTP error into an appropriate HTTPException."""
+    status = exc.response.status_code
+    if 400 <= status < 500:
+        try:
+            body = exc.response.json()
+            message = body.get("message", exc.response.reason_phrase)
+        except Exception:
+            message = exc.response.reason_phrase
+        return HTTPException(status_code=status, detail=f"GitHub: {message}")
+    return HTTPException(status_code=502, detail="GitHub API error")
+
+
 def _get_client_ip(request: Request) -> str:
     """Get the real client IP, respecting proxy headers."""
     forwarded = (
@@ -79,6 +93,11 @@ async def check_runs(owner: str, repo: str, ref: str, request: Request):
     _log_access(request, owner, repo, f"check-runs ref={ref}")
     try:
         runs = await github.get_check_runs(github_token, owner, repo, ref)
+    except httpx.HTTPStatusError as exc:
+        logger.exception(
+            "GitHub API error fetching check runs for %s/%s ref=%s", owner, repo, ref
+        )
+        raise _github_http_error(exc)
     except Exception:
         logger.exception(
             "GitHub API error fetching check runs for %s/%s ref=%s", owner, repo, ref
@@ -95,6 +114,11 @@ async def failed_logs(owner: str, repo: str, run_id: int, request: Request):
 
     try:
         jobs = await github.get_run_jobs(github_token, owner, repo, run_id)
+    except httpx.HTTPStatusError as exc:
+        logger.exception(
+            "GitHub API error fetching jobs for %s/%s run=%d", owner, repo, run_id
+        )
+        raise _github_http_error(exc)
     except Exception:
         logger.exception(
             "GitHub API error fetching jobs for %s/%s run=%d", owner, repo, run_id
@@ -110,6 +134,14 @@ async def failed_logs(owner: str, repo: str, run_id: int, request: Request):
         failed_steps = [s for s in job["steps"] if s["conclusion"] == "failure"]
         try:
             log_text = await github.get_job_log(github_token, owner, repo, job["id"])
+        except httpx.HTTPStatusError as exc:
+            logger.exception(
+                "GitHub API error fetching log for %s/%s job=%d",
+                owner,
+                repo,
+                job["id"],
+            )
+            raise _github_http_error(exc)
         except Exception:
             logger.exception(
                 "GitHub API error fetching log for %s/%s job=%d",
