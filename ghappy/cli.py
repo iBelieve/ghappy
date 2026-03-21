@@ -81,13 +81,7 @@ def _api_get(path: str, params: dict | None = None) -> dict:
         timeout=60,
     )
 
-    if resp.status_code == 401:
-        click.echo("Error: Invalid API key", err=True)
-        sys.exit(1)
-    elif resp.status_code == 403:
-        click.echo("Error: API key not authorized for this repository", err=True)
-        sys.exit(1)
-    elif resp.status_code >= 400:
+    if resp.status_code >= 400:
         detail = (
             resp.json().get("detail", resp.text)
             if resp.headers.get("content-type", "").startswith("application/json")
