@@ -168,13 +168,14 @@ def watch_pr_checks(interval: int):
 
         for run in sorted(runs, key=lambda r: r["name"]):
             status_text = _display_status(run["status"], run["conclusion"])
-            run_id = str(run["id"])
+            # Prefer workflow run ID (usable with view-run-failure) over check run ID.
+            display_id = str(run.get("workflow_run_id") or run["id"])
             name = run["name"]
 
             previous = prev_status.get(name)
             if previous != status_text:
                 click.echo(
-                    f"{name:<{name_width}}  {status_text:<{status_width}}  {run_id}"
+                    f"{name:<{name_width}}  {status_text:<{status_width}}  {display_id}"
                 )
                 prev_status[name] = status_text
 

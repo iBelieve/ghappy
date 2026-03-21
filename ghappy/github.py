@@ -1,5 +1,7 @@
 """GitHub API client for server-side use."""
 
+import re
+
 import httpx
 
 GITHUB_API = "https://api.github.com"
@@ -43,18 +45,29 @@ async def get_check_runs(
                 break
             page += 1
 
-    return [
-        {
-            "name": run["name"],
-            "status": run["status"],
-            "conclusion": run["conclusion"],
-            "id": run["id"],
-            "details_url": run.get("details_url"),
-            "started_at": run.get("started_at"),
-            "completed_at": run.get("completed_at"),
-        }
-        for run in all_runs
-    ]
+    results = []
+    for run in all_runs:
+        # GitHub Actions sets details_url to:
+        #   https://github.com/OWNER/REPO/actions/runs/RUN_ID/job/JOB_ID
+        workflow_run_id = None
+        details_url = run.get("details_url", "")
+        m = re.search(r"/actions/runs/(\d+)", details_url)
+        if m:
+            workflow_run_id = int(m.group(1))
+
+        results.append(
+            {
+                "name": run["name"],
+                "status": run["status"],
+                "conclusion": run["conclusion"],
+                "id": run["id"],
+                "workflow_run_id": workflow_run_id,
+                "details_url": details_url,
+                "started_at": run.get("started_at"),
+                "completed_at": run.get("completed_at"),
+            }
+        )
+    return results
 
 
 async def get_run_jobs(
