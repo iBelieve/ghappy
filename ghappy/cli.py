@@ -94,9 +94,7 @@ def _api_get(path: str, params: dict | None = None) -> dict:
                 detail = raw
         click.echo(f"Error: API returned {resp.status_code}: {detail}", err=True)
         if permissions:
-            click.echo(
-                f"Required GitHub permissions: {permissions}", err=True
-            )
+            click.echo(f"Required GitHub permissions: {permissions}", err=True)
         sys.exit(1)
 
     return resp.json()
@@ -132,9 +130,19 @@ def watch_pr_checks(interval: int):
 
     # All possible status/conclusion values that GitHub can return.
     all_statuses = [
-        "queued", "in_progress", "waiting", "pending", "requested",
-        "success", "failure", "cancelled", "skipped", "timed_out",
-        "action_required", "neutral", "stale",
+        "queued",
+        "in_progress",
+        "waiting",
+        "pending",
+        "requested",
+        "success",
+        "failure",
+        "cancelled",
+        "skipped",
+        "timed_out",
+        "action_required",
+        "neutral",
+        "stale",
     ]
     status_width = max(len(s) for s in all_statuses)
 
@@ -157,9 +165,7 @@ def watch_pr_checks(interval: int):
         if not header_printed:
             name_width = max(len(r["name"]) for r in runs)
             name_width = max(name_width, len("CHECK"))
-            click.echo(
-                f"{'CHECK':<{name_width}}  {'STATUS':<{status_width}}  RUN"
-            )
+            click.echo(f"{'CHECK':<{name_width}}  {'STATUS':<{status_width}}  RUN")
             click.echo(f"{'─' * name_width}  {'─' * status_width}  {'─' * 11}")
             header_printed = True
 
