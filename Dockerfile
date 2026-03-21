@@ -15,4 +15,4 @@ USER appuser
 
 EXPOSE 8000
 
-CMD ["uv", "run", "ghappy-server"]
+CMD ["/app/.venv/bin/ghappy-server"]
