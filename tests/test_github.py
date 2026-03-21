@@ -24,24 +24,37 @@ class TestHeaders:
 class TestGetCheckRuns:
     @pytest.mark.asyncio
     async def test_basic_check_runs(self):
+        """Workflow runs API returns runs, jobs are fetched for each."""
         mock_response = MagicMock()
         mock_response.status_code = 200
         mock_response.raise_for_status = MagicMock()
         mock_response.json.return_value = {
-            "check_runs": [
-                {
-                    "name": "lint",
-                    "status": "completed",
-                    "conclusion": "success",
-                    "id": 1,
-                    "details_url": "https://github.com/owner/repo/actions/runs/100/job/1",
-                    "started_at": "2024-01-01T00:00:00Z",
-                    "completed_at": "2024-01-01T00:01:00Z",
-                }
+            "workflow_runs": [
+                {"id": 100, "head_sha": "abc123"},
             ]
         }
 
-        with patch("ghappy.github.httpx.AsyncClient") as mock_client_cls:
+        mock_jobs = [
+            {
+                "name": "lint",
+                "status": "completed",
+                "conclusion": "success",
+                "id": 1,
+                "html_url": "https://github.com/owner/repo/actions/runs/100/job/1",
+                "started_at": "2024-01-01T00:00:00Z",
+                "completed_at": "2024-01-01T00:01:00Z",
+                "steps": [],
+            }
+        ]
+
+        with (
+            patch("ghappy.github.httpx.AsyncClient") as mock_client_cls,
+            patch(
+                "ghappy.github.get_run_jobs",
+                new_callable=AsyncMock,
+                return_value=mock_jobs,
+            ),
+        ):
             mock_client = AsyncMock()
             mock_client_cls.return_value.__aenter__ = AsyncMock(
                 return_value=mock_client
@@ -58,22 +71,34 @@ class TestGetCheckRuns:
         assert result[0]["workflow_run_id"] == 100
 
     @pytest.mark.asyncio
-    async def test_no_workflow_run_id_in_details_url(self):
+    async def test_uses_head_sha_for_full_sha_ref(self):
+        """When ref is a 40-char hex SHA, use head_sha query parameter."""
+        sha = "a" * 40
         mock_response = MagicMock()
         mock_response.raise_for_status = MagicMock()
-        mock_response.json.return_value = {
-            "check_runs": [
-                {
-                    "name": "external-check",
-                    "status": "completed",
-                    "conclusion": "success",
-                    "id": 42,
-                    "details_url": "https://example.com/check/42",
-                    "started_at": None,
-                    "completed_at": None,
-                }
-            ]
-        }
+        mock_response.json.return_value = {"workflow_runs": []}
+
+        with patch("ghappy.github.httpx.AsyncClient") as mock_client_cls:
+            mock_client = AsyncMock()
+            mock_client_cls.return_value.__aenter__ = AsyncMock(
+                return_value=mock_client
+            )
+            mock_client_cls.return_value.__aexit__ = AsyncMock(return_value=False)
+            mock_client.get = AsyncMock(return_value=mock_response)
+
+            result = await get_check_runs("token", "owner", "repo", sha)
+
+        # Verify head_sha was used in the API call
+        call_kwargs = mock_client.get.call_args
+        assert call_kwargs.kwargs["params"]["head_sha"] == sha
+        assert result == []
+
+    @pytest.mark.asyncio
+    async def test_uses_branch_for_non_sha_ref(self):
+        """When ref is a branch name, use branch query parameter."""
+        mock_response = MagicMock()
+        mock_response.raise_for_status = MagicMock()
+        mock_response.json.return_value = {"workflow_runs": []}
 
         with patch("ghappy.github.httpx.AsyncClient") as mock_client_cls:
             mock_client = AsyncMock()
@@ -85,56 +110,123 @@ class TestGetCheckRuns:
 
             result = await get_check_runs("token", "owner", "repo", "main")
 
-        assert result[0]["workflow_run_id"] is None
+        call_kwargs = mock_client.get.call_args
+        assert call_kwargs.kwargs["params"]["branch"] == "main"
+        assert result == []
 
     @pytest.mark.asyncio
-    async def test_pagination(self):
-        page1_response = MagicMock()
-        page1_response.raise_for_status = MagicMock()
-        page1_response.json.return_value = {
-            "check_runs": [
-                {
-                    "name": f"check-{i}",
-                    "status": "completed",
-                    "conclusion": "success",
-                    "id": i,
-                    "details_url": "",
-                }
-                for i in range(100)
+    async def test_filters_to_latest_commit(self):
+        """Only jobs from the most recent head_sha are returned."""
+        mock_response = MagicMock()
+        mock_response.raise_for_status = MagicMock()
+        mock_response.json.return_value = {
+            "workflow_runs": [
+                {"id": 200, "head_sha": "newer"},
+                {"id": 100, "head_sha": "older"},
             ]
         }
 
-        page2_response = MagicMock()
-        page2_response.raise_for_status = MagicMock()
-        page2_response.json.return_value = {
-            "check_runs": [
-                {
-                    "name": "check-100",
-                    "status": "completed",
-                    "conclusion": "success",
-                    "id": 100,
-                    "details_url": "",
-                }
-            ]
-        }
+        mock_jobs = [
+            {
+                "name": "test",
+                "status": "completed",
+                "conclusion": "success",
+                "id": 1,
+                "html_url": "",
+                "started_at": None,
+                "completed_at": None,
+                "steps": [],
+            }
+        ]
 
-        with patch("ghappy.github.httpx.AsyncClient") as mock_client_cls:
+        with (
+            patch("ghappy.github.httpx.AsyncClient") as mock_client_cls,
+            patch(
+                "ghappy.github.get_run_jobs",
+                new_callable=AsyncMock,
+                return_value=mock_jobs,
+            ) as mock_get_jobs,
+        ):
             mock_client = AsyncMock()
             mock_client_cls.return_value.__aenter__ = AsyncMock(
                 return_value=mock_client
             )
             mock_client_cls.return_value.__aexit__ = AsyncMock(return_value=False)
-            mock_client.get = AsyncMock(side_effect=[page1_response, page2_response])
+            mock_client.get = AsyncMock(return_value=mock_response)
 
             result = await get_check_runs("token", "owner", "repo", "main")
 
-        assert len(result) == 101
+        # Only the newer run should have its jobs fetched
+        mock_get_jobs.assert_called_once_with("token", "owner", "repo", 200)
+        assert len(result) == 1
+        assert result[0]["workflow_run_id"] == 200
 
     @pytest.mark.asyncio
-    async def test_empty_check_runs(self):
+    async def test_deduplicates_jobs_by_name(self):
+        """When multiple workflow runs have the same job name, keep the newest."""
         mock_response = MagicMock()
         mock_response.raise_for_status = MagicMock()
-        mock_response.json.return_value = {"check_runs": []}
+        mock_response.json.return_value = {
+            "workflow_runs": [
+                {"id": 300, "head_sha": "abc"},
+                {"id": 200, "head_sha": "abc"},
+            ]
+        }
+
+        def fake_get_run_jobs(_token, _owner, _repo, run_id):
+            if run_id == 300:
+                return [
+                    {
+                        "name": "Deploy to Preview Environment",
+                        "status": "completed",
+                        "conclusion": "skipped",
+                        "id": 10,
+                        "html_url": "",
+                        "started_at": None,
+                        "completed_at": None,
+                        "steps": [],
+                    }
+                ]
+            return [
+                {
+                    "name": "Deploy to Preview Environment",
+                    "status": "completed",
+                    "conclusion": "success",
+                    "id": 5,
+                    "html_url": "",
+                    "started_at": None,
+                    "completed_at": None,
+                    "steps": [],
+                }
+            ]
+
+        with (
+            patch("ghappy.github.httpx.AsyncClient") as mock_client_cls,
+            patch(
+                "ghappy.github.get_run_jobs",
+                new_callable=AsyncMock,
+                side_effect=fake_get_run_jobs,
+            ),
+        ):
+            mock_client = AsyncMock()
+            mock_client_cls.return_value.__aenter__ = AsyncMock(
+                return_value=mock_client
+            )
+            mock_client_cls.return_value.__aexit__ = AsyncMock(return_value=False)
+            mock_client.get = AsyncMock(return_value=mock_response)
+
+            result = await get_check_runs("token", "owner", "repo", "main")
+
+        # Should have only one entry, from the newer run (id=300)
+        assert len(result) == 1
+        assert result[0]["workflow_run_id"] == 300
+        assert result[0]["conclusion"] == "skipped"
+
+    @pytest.mark.asyncio
+    async def test_empty_workflow_runs(self):
+        mock_response = MagicMock()
+        mock_response.raise_for_status = MagicMock()
+        mock_response.json.return_value = {"workflow_runs": []}
 
         with patch("ghappy.github.httpx.AsyncClient") as mock_client_cls:
             mock_client = AsyncMock()
@@ -161,6 +253,9 @@ class TestGetRunJobs:
                     "name": "build",
                     "status": "completed",
                     "conclusion": "failure",
+                    "html_url": "https://github.com/owner/repo/actions/runs/123/job/1",
+                    "started_at": "2024-01-01T00:00:00Z",
+                    "completed_at": "2024-01-01T00:01:00Z",
                     "steps": [
                         {
                             "name": "Run tests",
@@ -186,6 +281,12 @@ class TestGetRunJobs:
         assert len(result) == 1
         assert result[0]["name"] == "build"
         assert result[0]["conclusion"] == "failure"
+        assert (
+            result[0]["html_url"]
+            == "https://github.com/owner/repo/actions/runs/123/job/1"
+        )
+        assert result[0]["started_at"] == "2024-01-01T00:00:00Z"
+        assert result[0]["completed_at"] == "2024-01-01T00:01:00Z"
         assert len(result[0]["steps"]) == 1
         assert result[0]["steps"][0]["name"] == "Run tests"
 

@@ -23,51 +23,55 @@ async def get_check_runs(
 ) -> list[dict]:
     """Get check runs for a git reference (branch, tag, or SHA).
 
+    Uses the GitHub Actions workflow runs and jobs APIs instead of the
+    checks API, since fine-grained PATs don't support the checks API.
+
     Returns a list of check run dicts with: name, status, conclusion, id,
-    started_at, completed_at, details_url.
+    workflow_run_id, details_url, started_at, completed_at.
     """
-    url = f"{GITHUB_API}/repos/{owner}/{repo}/commits/{ref}/check-runs"
-    all_runs = []
-    page = 1
+    # Use head_sha for full SHAs, branch name otherwise.
+    if re.fullmatch(r"[0-9a-fA-F]{40}", ref):
+        params: dict[str, str | int] = {"head_sha": ref, "per_page": 100}
+    else:
+        params = {"branch": ref, "per_page": 100}
+
+    url = f"{GITHUB_API}/repos/{owner}/{repo}/actions/runs"
 
     async with httpx.AsyncClient(timeout=REQUEST_TIMEOUT) as client:
-        while page <= MAX_PAGES:
-            resp = await client.get(
-                url,
-                headers=_headers(github_token),
-                params={"per_page": 100, "page": page},
-            )
-            resp.raise_for_status()
-            data = resp.json()
-            runs = data.get("check_runs", [])
-            all_runs.extend(runs)
-            if len(runs) < 100:
-                break
-            page += 1
+        resp = await client.get(url, headers=_headers(github_token), params=params)
+        resp.raise_for_status()
+        data = resp.json()
+        workflow_runs = data.get("workflow_runs", [])
 
-    results = []
-    for run in all_runs:
-        # GitHub Actions sets details_url to:
-        #   https://github.com/OWNER/REPO/actions/runs/RUN_ID/job/JOB_ID
-        workflow_run_id = None
-        details_url = run.get("details_url", "")
-        m = re.search(r"/actions/runs/(\d+)", details_url)
-        if m:
-            workflow_run_id = int(m.group(1))
+    if not workflow_runs:
+        return []
 
-        results.append(
-            {
-                "name": run["name"],
-                "status": run["status"],
-                "conclusion": run["conclusion"],
-                "id": run["id"],
-                "workflow_run_id": workflow_run_id,
-                "details_url": details_url,
-                "started_at": run.get("started_at"),
-                "completed_at": run.get("completed_at"),
-            }
-        )
-    return results
+    # The API returns runs newest first. Keep only runs for the latest commit.
+    latest_sha = workflow_runs[0]["head_sha"]
+    current_runs = [r for r in workflow_runs if r["head_sha"] == latest_sha]
+
+    # Fetch jobs for each workflow run and map to check-run format.
+    # Deduplicate by job name, keeping the entry from the newest run
+    # (highest run_id). Multiple workflow runs for the same commit can
+    # produce duplicate job names (e.g. re-runs or parallel triggers).
+    seen: dict[str, dict] = {}
+    for wf_run in current_runs:
+        run_id = wf_run["id"]
+        jobs = await get_run_jobs(github_token, owner, repo, run_id)
+        for job in jobs:
+            name = job["name"]
+            if name not in seen or run_id > seen[name]["workflow_run_id"]:
+                seen[name] = {
+                    "name": name,
+                    "status": job["status"],
+                    "conclusion": job["conclusion"],
+                    "id": job["id"],
+                    "workflow_run_id": run_id,
+                    "details_url": job.get("html_url", ""),
+                    "started_at": job.get("started_at"),
+                    "completed_at": job.get("completed_at"),
+                }
+    return list(seen.values())
 
 
 async def get_run_jobs(
@@ -102,6 +106,9 @@ async def get_run_jobs(
             "name": job["name"],
             "status": job["status"],
             "conclusion": job["conclusion"],
+            "html_url": job.get("html_url", ""),
+            "started_at": job.get("started_at"),
+            "completed_at": job.get("completed_at"),
             "steps": [
                 {
                     "name": step["name"],
