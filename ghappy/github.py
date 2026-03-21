@@ -38,9 +38,7 @@ async def get_check_runs(
     url = f"{GITHUB_API}/repos/{owner}/{repo}/actions/runs"
 
     async with httpx.AsyncClient(timeout=REQUEST_TIMEOUT) as client:
-        resp = await client.get(
-            url, headers=_headers(github_token), params=params
-        )
+        resp = await client.get(url, headers=_headers(github_token), params=params)
         resp.raise_for_status()
         data = resp.json()
         workflow_runs = data.get("workflow_runs", [])

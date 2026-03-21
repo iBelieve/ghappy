@@ -49,7 +49,11 @@ class TestGetCheckRuns:
 
         with (
             patch("ghappy.github.httpx.AsyncClient") as mock_client_cls,
-            patch("ghappy.github.get_run_jobs", new_callable=AsyncMock, return_value=mock_jobs),
+            patch(
+                "ghappy.github.get_run_jobs",
+                new_callable=AsyncMock,
+                return_value=mock_jobs,
+            ),
         ):
             mock_client = AsyncMock()
             mock_client_cls.return_value.__aenter__ = AsyncMock(
@@ -137,7 +141,11 @@ class TestGetCheckRuns:
 
         with (
             patch("ghappy.github.httpx.AsyncClient") as mock_client_cls,
-            patch("ghappy.github.get_run_jobs", new_callable=AsyncMock, return_value=mock_jobs) as mock_get_jobs,
+            patch(
+                "ghappy.github.get_run_jobs",
+                new_callable=AsyncMock,
+                return_value=mock_jobs,
+            ) as mock_get_jobs,
         ):
             mock_client = AsyncMock()
             mock_client_cls.return_value.__aenter__ = AsyncMock(
@@ -194,7 +202,11 @@ class TestGetCheckRuns:
 
         with (
             patch("ghappy.github.httpx.AsyncClient") as mock_client_cls,
-            patch("ghappy.github.get_run_jobs", new_callable=AsyncMock, side_effect=fake_get_run_jobs),
+            patch(
+                "ghappy.github.get_run_jobs",
+                new_callable=AsyncMock,
+                side_effect=fake_get_run_jobs,
+            ),
         ):
             mock_client = AsyncMock()
             mock_client_cls.return_value.__aenter__ = AsyncMock(
@@ -269,7 +281,10 @@ class TestGetRunJobs:
         assert len(result) == 1
         assert result[0]["name"] == "build"
         assert result[0]["conclusion"] == "failure"
-        assert result[0]["html_url"] == "https://github.com/owner/repo/actions/runs/123/job/1"
+        assert (
+            result[0]["html_url"]
+            == "https://github.com/owner/repo/actions/runs/123/job/1"
+        )
         assert result[0]["started_at"] == "2024-01-01T00:00:00Z"
         assert result[0]["completed_at"] == "2024-01-01T00:01:00Z"
         assert len(result[0]["steps"]) == 1
