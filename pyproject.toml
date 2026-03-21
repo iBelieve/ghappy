@@ -22,6 +22,9 @@ ghappy-server = "ghappy.server:main"
 dev = [
     "ruff",
     "pyright",
+    "pytest",
+    "pytest-asyncio",
+    "httpx",  # for TestClient
 ]
 
 [tool.ruff]
