@@ -170,6 +170,58 @@ async def failed_logs(owner: str, repo: str, run_id: int, request: Request):
     return JSONResponse(content={"logs": logs})
 
 
+@app.get("/repos/{owner}/{repo}/latest-copilot-review-comments")
+async def latest_copilot_review_comments(
+    owner: str, repo: str, branch: str, request: Request
+):
+    """Get unresolved Copilot review comments for a PR."""
+    github_token = _authenticate(request, owner, repo)
+    _log_access(request, owner, repo, f"pr-comments branch={branch}")
+
+    try:
+        pr_number = await github.get_pr_number_for_branch(
+            github_token, owner, repo, branch
+        )
+    except httpx.HTTPStatusError as exc:
+        logger.exception(
+            "GitHub API error finding PR for %s/%s branch=%s", owner, repo, branch
+        )
+        raise _github_http_error(exc)
+    except Exception:
+        logger.exception(
+            "GitHub API error finding PR for %s/%s branch=%s", owner, repo, branch
+        )
+        raise HTTPException(status_code=502, detail="GitHub API error")
+
+    if pr_number is None:
+        return JSONResponse(
+            content={"comments": [], "message": f"No open PR found for branch {branch}"}
+        )
+
+    try:
+        comments = await github.get_unresolved_copilot_comments(
+            github_token, owner, repo, pr_number
+        )
+    except httpx.HTTPStatusError as exc:
+        logger.exception(
+            "GitHub API error fetching PR comments for %s/%s PR #%d",
+            owner,
+            repo,
+            pr_number,
+        )
+        raise _github_http_error(exc)
+    except Exception:
+        logger.exception(
+            "GitHub API error fetching PR comments for %s/%s PR #%d",
+            owner,
+            repo,
+            pr_number,
+        )
+        raise HTTPException(status_code=502, detail="GitHub API error")
+
+    return JSONResponse(content={"comments": comments, "pr_number": pr_number})
+
+
 def main():
     """Entry point for ghappy-server."""
     import uvicorn

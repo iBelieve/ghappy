@@ -275,6 +275,141 @@ class TestGetClientIp:
         assert _get_client_ip(request) == "unknown"
 
 
+class TestLatestCopilotReviewCommentsEndpoint:
+    def test_no_open_pr(self, client):
+        with patch(
+            "ghappy.server.github.get_pr_number_for_branch",
+            new_callable=AsyncMock,
+            return_value=None,
+        ):
+            resp = client.get(
+                "/repos/owner/repo/latest-copilot-review-comments?branch=feat",
+                headers=AUTH_HEADER,
+            )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["comments"] == []
+        assert "No open PR" in data["message"]
+
+    def test_with_comments(self, client):
+        mock_comments = [
+            {
+                "path": "src/main.py",
+                "line": 10,
+                "start_line": None,
+                "body": "Fix this bug",
+                "url": "https://github.com/owner/repo/pull/42#comment-1",
+            }
+        ]
+        with (
+            patch(
+                "ghappy.server.github.get_pr_number_for_branch",
+                new_callable=AsyncMock,
+                return_value=42,
+            ),
+            patch(
+                "ghappy.server.github.get_unresolved_copilot_comments",
+                new_callable=AsyncMock,
+                return_value=mock_comments,
+            ),
+        ):
+            resp = client.get(
+                "/repos/owner/repo/latest-copilot-review-comments?branch=feat",
+                headers=AUTH_HEADER,
+            )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["pr_number"] == 42
+        assert len(data["comments"]) == 1
+        assert data["comments"][0]["body"] == "Fix this bug"
+
+    def test_no_unresolved_comments(self, client):
+        with (
+            patch(
+                "ghappy.server.github.get_pr_number_for_branch",
+                new_callable=AsyncMock,
+                return_value=42,
+            ),
+            patch(
+                "ghappy.server.github.get_unresolved_copilot_comments",
+                new_callable=AsyncMock,
+                return_value=[],
+            ),
+        ):
+            resp = client.get(
+                "/repos/owner/repo/latest-copilot-review-comments?branch=feat",
+                headers=AUTH_HEADER,
+            )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["comments"] == []
+        assert data["pr_number"] == 42
+
+    def test_missing_branch_param(self, client):
+        resp = client.get(
+            "/repos/owner/repo/latest-copilot-review-comments",
+            headers=AUTH_HEADER,
+        )
+        assert resp.status_code == 422
+
+    def test_github_error_on_pr_lookup(self, client):
+        mock_request = httpx.Request("GET", "https://api.github.com/test")
+        mock_response = httpx.Response(
+            404, json={"message": "Not Found"}, request=mock_request
+        )
+        exc = httpx.HTTPStatusError(
+            "Not Found", request=mock_request, response=mock_response
+        )
+        with patch(
+            "ghappy.server.github.get_pr_number_for_branch",
+            new_callable=AsyncMock,
+            side_effect=exc,
+        ):
+            resp = client.get(
+                "/repos/owner/repo/latest-copilot-review-comments?branch=feat",
+                headers=AUTH_HEADER,
+            )
+        assert resp.status_code == 404
+
+    def test_github_error_on_comments(self, client):
+        mock_request = httpx.Request("GET", "https://api.github.com/test")
+        mock_response = httpx.Response(
+            403, json={"message": "Forbidden"}, request=mock_request
+        )
+        exc = httpx.HTTPStatusError(
+            "Forbidden", request=mock_request, response=mock_response
+        )
+        with (
+            patch(
+                "ghappy.server.github.get_pr_number_for_branch",
+                new_callable=AsyncMock,
+                return_value=42,
+            ),
+            patch(
+                "ghappy.server.github.get_unresolved_copilot_comments",
+                new_callable=AsyncMock,
+                side_effect=exc,
+            ),
+        ):
+            resp = client.get(
+                "/repos/owner/repo/latest-copilot-review-comments?branch=feat",
+                headers=AUTH_HEADER,
+            )
+        assert resp.status_code == 403
+
+    def test_generic_error(self, client):
+        with patch(
+            "ghappy.server.github.get_pr_number_for_branch",
+            new_callable=AsyncMock,
+            side_effect=RuntimeError("oops"),
+        ):
+            resp = client.get(
+                "/repos/owner/repo/latest-copilot-review-comments?branch=feat",
+                headers=AUTH_HEADER,
+            )
+        assert resp.status_code == 502
+
+
 def _make_request(headers=None, client_host: str | None = "127.0.0.1"):
     """Create a minimal mock Request."""
     from unittest.mock import MagicMock
