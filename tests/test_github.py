@@ -430,7 +430,16 @@ def _graphql_response(threads, has_next_page=False, end_cursor=None):
     }
 
 
-def _thread(*, resolved=False, author="copilot", review_id=1, review_created="2024-01-01T00:00:00Z", body="fix this", path="src/main.py", line=10):
+def _thread(
+    *,
+    resolved=False,
+    author="copilot",
+    review_id=1,
+    review_created="2024-01-01T00:00:00Z",
+    body="fix this",
+    path="src/main.py",
+    line=10,
+):
     """Build a review thread node for testing."""
     return {
         "isResolved": resolved,
@@ -482,8 +491,18 @@ class TestGetUnresolvedCopilotComments:
     @pytest.mark.asyncio
     async def test_filters_to_latest_copilot_review(self):
         threads = [
-            _thread(resolved=False, review_id=1, review_created="2024-01-01T00:00:00Z", body="old"),
-            _thread(resolved=False, review_id=2, review_created="2024-01-02T00:00:00Z", body="new"),
+            _thread(
+                resolved=False,
+                review_id=1,
+                review_created="2024-01-01T00:00:00Z",
+                body="old",
+            ),
+            _thread(
+                resolved=False,
+                review_id=2,
+                review_created="2024-01-02T00:00:00Z",
+                body="new",
+            ),
         ]
         mock_response = MagicMock()
         mock_response.raise_for_status = MagicMock()

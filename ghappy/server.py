@@ -219,9 +219,7 @@ async def latest_copilot_review_comments(
         )
         raise HTTPException(status_code=502, detail="GitHub API error")
 
-    return JSONResponse(
-        content={"comments": comments, "pr_number": pr_number}
-    )
+    return JSONResponse(content={"comments": comments, "pr_number": pr_number})
 
 
 def main():

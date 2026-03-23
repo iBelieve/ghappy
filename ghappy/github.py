@@ -199,9 +199,7 @@ async def get_unresolved_copilot_comments(
             if "errors" in data:
                 raise RuntimeError(f"GraphQL error: {data['errors']}")
 
-            threads_data = data["data"]["repository"]["pullRequest"][
-                "reviewThreads"
-            ]
+            threads_data = data["data"]["repository"]["pullRequest"]["reviewThreads"]
             all_threads.extend(threads_data["nodes"])
             if not threads_data["pageInfo"]["hasNextPage"]:
                 break
