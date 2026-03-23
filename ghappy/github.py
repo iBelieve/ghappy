@@ -123,6 +123,135 @@ async def get_run_jobs(
     ]
 
 
+async def get_pr_number_for_branch(
+    github_token: str, owner: str, repo: str, branch: str
+) -> int | None:
+    """Find the open pull request number for a branch.
+
+    Returns the PR number, or None if no open PR exists.
+    """
+    url = f"{GITHUB_API}/repos/{owner}/{repo}/pulls"
+    params = {"head": f"{owner}:{branch}", "state": "open", "per_page": 1}
+
+    async with httpx.AsyncClient(timeout=REQUEST_TIMEOUT) as client:
+        resp = await client.get(url, headers=_headers(github_token), params=params)
+        resp.raise_for_status()
+        prs = resp.json()
+
+    if not prs:
+        return None
+    return prs[0]["number"]
+
+
+_REVIEW_THREADS_QUERY = """
+query($owner: String!, $repo: String!, $pr: Int!, $cursor: String) {
+  repository(owner: $owner, name: $repo) {
+    pullRequest(number: $pr) {
+      reviewThreads(first: 100, after: $cursor) {
+        pageInfo { hasNextPage endCursor }
+        nodes {
+          isResolved
+          comments(first: 1) {
+            nodes {
+              author { login }
+              body
+              path
+              line
+              startLine
+              url
+              pullRequestReview {
+                databaseId
+                createdAt
+                author { login }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
+"""
+
+
+async def get_unresolved_copilot_comments(
+    github_token: str, owner: str, repo: str, pr_number: int
+) -> list[dict]:
+    """Get unresolved review comments from the latest Copilot review.
+
+    Uses the GraphQL API to access review thread resolution status.
+    Returns a list of comment dicts with: path, line, start_line, body, url.
+    """
+    graphql_url = f"{GITHUB_API}/graphql"
+    variables: dict = {"owner": owner, "repo": repo, "pr": pr_number, "cursor": None}
+
+    all_threads: list[dict] = []
+    async with httpx.AsyncClient(timeout=REQUEST_TIMEOUT) as client:
+        for _ in range(MAX_PAGES):
+            resp = await client.post(
+                graphql_url,
+                headers=_headers(github_token),
+                json={"query": _REVIEW_THREADS_QUERY, "variables": variables},
+            )
+            resp.raise_for_status()
+            data = resp.json()
+
+            if "errors" in data:
+                raise RuntimeError(f"GraphQL error: {data['errors']}")
+
+            threads_data = data["data"]["repository"]["pullRequest"][
+                "reviewThreads"
+            ]
+            all_threads.extend(threads_data["nodes"])
+            if not threads_data["pageInfo"]["hasNextPage"]:
+                break
+            variables["cursor"] = threads_data["pageInfo"]["endCursor"]
+
+    # Identify the latest Copilot review by database ID and created time.
+    copilot_reviews: dict[int, str] = {}  # review database_id -> createdAt
+    for thread in all_threads:
+        comments = thread["comments"]["nodes"]
+        if not comments:
+            continue
+        comment = comments[0]
+        review = comment.get("pullRequestReview")
+        if not review:
+            continue
+        author = review.get("author")
+        if author and author["login"].startswith("copilot"):
+            rid = review["databaseId"]
+            copilot_reviews[rid] = review["createdAt"]
+
+    if not copilot_reviews:
+        return []
+
+    latest_review_id = max(copilot_reviews, key=lambda rid: copilot_reviews[rid])
+
+    # Collect unresolved comments from the latest Copilot review.
+    result = []
+    for thread in all_threads:
+        if thread["isResolved"]:
+            continue
+        comments = thread["comments"]["nodes"]
+        if not comments:
+            continue
+        comment = comments[0]
+        review = comment.get("pullRequestReview")
+        if not review or review["databaseId"] != latest_review_id:
+            continue
+        result.append(
+            {
+                "path": comment.get("path"),
+                "line": comment.get("line"),
+                "start_line": comment.get("startLine"),
+                "body": comment.get("body", ""),
+                "url": comment.get("url", ""),
+            }
+        )
+
+    return result
+
+
 async def get_job_log(github_token: str, owner: str, repo: str, job_id: int) -> str:
     """Download logs for a specific job.
 

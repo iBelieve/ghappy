@@ -255,5 +255,50 @@ def view_run_failure(run_id: int):
                 click.echo(f"{job_name}\t{step_label}\t{timestamp} {message}")
 
 
+@cli.command("pr-comments")
+def pr_comments():
+    """Show unresolved Copilot review comments on the current branch's PR.
+
+    Finds the open PR for the current branch and displays any unresolved
+    comments from the most recent Copilot code review.
+    """
+    repo = _detect_repo()
+    branch = _detect_branch()
+    owner, repo_name = repo.split("/", 1)
+
+    data = _api_get(
+        f"/repos/{owner}/{repo_name}/pr-comments", params={"branch": branch}
+    )
+    comments = data.get("comments", [])
+    pr_number = data.get("pr_number")
+
+    if not comments:
+        message = data.get("message")
+        if message:
+            click.echo(message)
+        elif pr_number:
+            click.echo(f"No unresolved Copilot review comments on PR #{pr_number}.")
+        else:
+            click.echo("No unresolved Copilot review comments found.")
+        return
+
+    click.echo(f"Unresolved Copilot comments on PR #{pr_number}:\n")
+    for comment in comments:
+        path = comment.get("path", "")
+        line = comment.get("line")
+        start_line = comment.get("start_line")
+
+        if start_line and start_line != line:
+            location = f"{path}:{start_line}-{line}"
+        elif line:
+            location = f"{path}:{line}"
+        else:
+            location = path
+
+        click.echo(f"--- {location}")
+        click.echo(comment.get("body", "").rstrip())
+        click.echo()
+
+
 if __name__ == "__main__":
     cli()

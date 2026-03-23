@@ -9,7 +9,9 @@ from ghappy.github import (
     _headers,
     get_check_runs,
     get_job_log,
+    get_pr_number_for_branch,
     get_run_jobs,
+    get_unresolved_copilot_comments,
 )
 
 
@@ -367,6 +369,194 @@ class TestGetJobLog:
             result = await get_job_log("token", "owner", "repo", 1)
 
         assert len(result) == MAX_LOG_BYTES
+
+
+class TestGetPrNumberForBranch:
+    @pytest.mark.asyncio
+    async def test_finds_open_pr(self):
+        mock_response = MagicMock()
+        mock_response.raise_for_status = MagicMock()
+        mock_response.json.return_value = [{"number": 42}]
+
+        with patch("ghappy.github.httpx.AsyncClient") as mock_client_cls:
+            mock_client = AsyncMock()
+            mock_client_cls.return_value.__aenter__ = AsyncMock(
+                return_value=mock_client
+            )
+            mock_client_cls.return_value.__aexit__ = AsyncMock(return_value=False)
+            mock_client.get = AsyncMock(return_value=mock_response)
+
+            result = await get_pr_number_for_branch("token", "owner", "repo", "feat")
+
+        assert result == 42
+        call_kwargs = mock_client.get.call_args
+        assert call_kwargs.kwargs["params"]["head"] == "owner:feat"
+
+    @pytest.mark.asyncio
+    async def test_no_open_pr(self):
+        mock_response = MagicMock()
+        mock_response.raise_for_status = MagicMock()
+        mock_response.json.return_value = []
+
+        with patch("ghappy.github.httpx.AsyncClient") as mock_client_cls:
+            mock_client = AsyncMock()
+            mock_client_cls.return_value.__aenter__ = AsyncMock(
+                return_value=mock_client
+            )
+            mock_client_cls.return_value.__aexit__ = AsyncMock(return_value=False)
+            mock_client.get = AsyncMock(return_value=mock_response)
+
+            result = await get_pr_number_for_branch("token", "owner", "repo", "feat")
+
+        assert result is None
+
+
+def _graphql_response(threads, has_next_page=False, end_cursor=None):
+    """Build a mock GraphQL response for reviewThreads."""
+    return {
+        "data": {
+            "repository": {
+                "pullRequest": {
+                    "reviewThreads": {
+                        "pageInfo": {
+                            "hasNextPage": has_next_page,
+                            "endCursor": end_cursor,
+                        },
+                        "nodes": threads,
+                    }
+                }
+            }
+        }
+    }
+
+
+def _thread(*, resolved=False, author="copilot", review_id=1, review_created="2024-01-01T00:00:00Z", body="fix this", path="src/main.py", line=10):
+    """Build a review thread node for testing."""
+    return {
+        "isResolved": resolved,
+        "comments": {
+            "nodes": [
+                {
+                    "author": {"login": author},
+                    "body": body,
+                    "path": path,
+                    "line": line,
+                    "startLine": None,
+                    "url": f"https://github.com/owner/repo/pull/1#comment-{review_id}",
+                    "pullRequestReview": {
+                        "databaseId": review_id,
+                        "createdAt": review_created,
+                        "author": {"login": author},
+                    },
+                }
+            ]
+        },
+    }
+
+
+class TestGetUnresolvedCopilotComments:
+    @pytest.mark.asyncio
+    async def test_returns_unresolved_copilot_comments(self):
+        threads = [
+            _thread(resolved=False, review_id=1, body="fix this"),
+            _thread(resolved=True, review_id=1, body="already fixed"),
+        ]
+        mock_response = MagicMock()
+        mock_response.raise_for_status = MagicMock()
+        mock_response.json.return_value = _graphql_response(threads)
+
+        with patch("ghappy.github.httpx.AsyncClient") as mock_client_cls:
+            mock_client = AsyncMock()
+            mock_client_cls.return_value.__aenter__ = AsyncMock(
+                return_value=mock_client
+            )
+            mock_client_cls.return_value.__aexit__ = AsyncMock(return_value=False)
+            mock_client.post = AsyncMock(return_value=mock_response)
+
+            result = await get_unresolved_copilot_comments("token", "owner", "repo", 1)
+
+        assert len(result) == 1
+        assert result[0]["body"] == "fix this"
+        assert result[0]["path"] == "src/main.py"
+
+    @pytest.mark.asyncio
+    async def test_filters_to_latest_copilot_review(self):
+        threads = [
+            _thread(resolved=False, review_id=1, review_created="2024-01-01T00:00:00Z", body="old"),
+            _thread(resolved=False, review_id=2, review_created="2024-01-02T00:00:00Z", body="new"),
+        ]
+        mock_response = MagicMock()
+        mock_response.raise_for_status = MagicMock()
+        mock_response.json.return_value = _graphql_response(threads)
+
+        with patch("ghappy.github.httpx.AsyncClient") as mock_client_cls:
+            mock_client = AsyncMock()
+            mock_client_cls.return_value.__aenter__ = AsyncMock(
+                return_value=mock_client
+            )
+            mock_client_cls.return_value.__aexit__ = AsyncMock(return_value=False)
+            mock_client.post = AsyncMock(return_value=mock_response)
+
+            result = await get_unresolved_copilot_comments("token", "owner", "repo", 1)
+
+        assert len(result) == 1
+        assert result[0]["body"] == "new"
+
+    @pytest.mark.asyncio
+    async def test_no_copilot_reviews(self):
+        threads = [
+            _thread(resolved=False, author="human-reviewer", review_id=1),
+        ]
+        mock_response = MagicMock()
+        mock_response.raise_for_status = MagicMock()
+        mock_response.json.return_value = _graphql_response(threads)
+
+        with patch("ghappy.github.httpx.AsyncClient") as mock_client_cls:
+            mock_client = AsyncMock()
+            mock_client_cls.return_value.__aenter__ = AsyncMock(
+                return_value=mock_client
+            )
+            mock_client_cls.return_value.__aexit__ = AsyncMock(return_value=False)
+            mock_client.post = AsyncMock(return_value=mock_response)
+
+            result = await get_unresolved_copilot_comments("token", "owner", "repo", 1)
+
+        assert result == []
+
+    @pytest.mark.asyncio
+    async def test_empty_threads(self):
+        mock_response = MagicMock()
+        mock_response.raise_for_status = MagicMock()
+        mock_response.json.return_value = _graphql_response([])
+
+        with patch("ghappy.github.httpx.AsyncClient") as mock_client_cls:
+            mock_client = AsyncMock()
+            mock_client_cls.return_value.__aenter__ = AsyncMock(
+                return_value=mock_client
+            )
+            mock_client_cls.return_value.__aexit__ = AsyncMock(return_value=False)
+            mock_client.post = AsyncMock(return_value=mock_response)
+
+            result = await get_unresolved_copilot_comments("token", "owner", "repo", 1)
+
+        assert result == []
+
+    @pytest.mark.asyncio
+    async def test_graphql_error_raises(self):
+        mock_response = MagicMock()
+        mock_response.raise_for_status = MagicMock()
+        mock_response.json.return_value = {"errors": [{"message": "bad query"}]}
+
+        with patch("ghappy.github.httpx.AsyncClient") as mock_client_cls:
+            mock_client = AsyncMock()
+            mock_client_cls.return_value.__aenter__ = AsyncMock(
+                return_value=mock_client
+            )
+            mock_client_cls.return_value.__aexit__ = AsyncMock(return_value=False)
+            mock_client.post = AsyncMock(return_value=mock_response)
+
+            with pytest.raises(RuntimeError, match="GraphQL error"):
+                await get_unresolved_copilot_comments("token", "owner", "repo", 1)
 
 
 async def _async_iter(items):

@@ -213,3 +213,84 @@ class TestViewRunFailure:
 
         assert result.exit_code == 0
         assert "no logs available" in result.output
+
+
+class TestPrComments:
+    def test_with_comments(self):
+        runner = CliRunner()
+        data = {
+            "comments": [
+                {
+                    "path": "src/main.py",
+                    "line": 10,
+                    "start_line": None,
+                    "body": "Fix this bug",
+                    "url": "https://github.com/owner/repo/pull/42#comment-1",
+                }
+            ],
+            "pr_number": 42,
+        }
+        with (
+            patch("ghappy.cli._detect_repo", return_value="owner/repo"),
+            patch("ghappy.cli._detect_branch", return_value="feat"),
+            patch("ghappy.cli._api_get", return_value=data),
+        ):
+            result = runner.invoke(cli, ["pr-comments"])
+
+        assert result.exit_code == 0
+        assert "PR #42" in result.output
+        assert "src/main.py:10" in result.output
+        assert "Fix this bug" in result.output
+
+    def test_with_multiline_comment(self):
+        runner = CliRunner()
+        data = {
+            "comments": [
+                {
+                    "path": "src/main.py",
+                    "line": 15,
+                    "start_line": 10,
+                    "body": "Refactor this block",
+                    "url": "https://github.com/owner/repo/pull/42#comment-2",
+                }
+            ],
+            "pr_number": 42,
+        }
+        with (
+            patch("ghappy.cli._detect_repo", return_value="owner/repo"),
+            patch("ghappy.cli._detect_branch", return_value="feat"),
+            patch("ghappy.cli._api_get", return_value=data),
+        ):
+            result = runner.invoke(cli, ["pr-comments"])
+
+        assert result.exit_code == 0
+        assert "src/main.py:10-15" in result.output
+
+    def test_no_open_pr(self):
+        runner = CliRunner()
+        data = {
+            "comments": [],
+            "message": "No open PR found for branch feat",
+        }
+        with (
+            patch("ghappy.cli._detect_repo", return_value="owner/repo"),
+            patch("ghappy.cli._detect_branch", return_value="feat"),
+            patch("ghappy.cli._api_get", return_value=data),
+        ):
+            result = runner.invoke(cli, ["pr-comments"])
+
+        assert result.exit_code == 0
+        assert "No open PR found" in result.output
+
+    def test_no_unresolved_comments(self):
+        runner = CliRunner()
+        data = {"comments": [], "pr_number": 42}
+        with (
+            patch("ghappy.cli._detect_repo", return_value="owner/repo"),
+            patch("ghappy.cli._detect_branch", return_value="feat"),
+            patch("ghappy.cli._api_get", return_value=data),
+        ):
+            result = runner.invoke(cli, ["pr-comments"])
+
+        assert result.exit_code == 0
+        assert "No unresolved Copilot review comments on PR #42" in result.output
