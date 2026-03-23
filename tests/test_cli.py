@@ -215,7 +215,7 @@ class TestViewRunFailure:
         assert "no logs available" in result.output
 
 
-class TestPrComments:
+class TestCopilotReview:
     def test_with_comments(self):
         runner = CliRunner()
         data = {
@@ -235,7 +235,7 @@ class TestPrComments:
             patch("ghappy.cli._detect_branch", return_value="feat"),
             patch("ghappy.cli._api_get", return_value=data),
         ):
-            result = runner.invoke(cli, ["pr-comments"])
+            result = runner.invoke(cli, ["copilot-review"])
 
         assert result.exit_code == 0
         assert "PR #42" in result.output
@@ -261,7 +261,7 @@ class TestPrComments:
             patch("ghappy.cli._detect_branch", return_value="feat"),
             patch("ghappy.cli._api_get", return_value=data),
         ):
-            result = runner.invoke(cli, ["pr-comments"])
+            result = runner.invoke(cli, ["copilot-review"])
 
         assert result.exit_code == 0
         assert "src/main.py:10-15" in result.output
@@ -277,7 +277,7 @@ class TestPrComments:
             patch("ghappy.cli._detect_branch", return_value="feat"),
             patch("ghappy.cli._api_get", return_value=data),
         ):
-            result = runner.invoke(cli, ["pr-comments"])
+            result = runner.invoke(cli, ["copilot-review"])
 
         assert result.exit_code == 0
         assert "No open PR found" in result.output
@@ -290,7 +290,7 @@ class TestPrComments:
             patch("ghappy.cli._detect_branch", return_value="feat"),
             patch("ghappy.cli._api_get", return_value=data),
         ):
-            result = runner.invoke(cli, ["pr-comments"])
+            result = runner.invoke(cli, ["copilot-review"])
 
         assert result.exit_code == 0
         assert "No unresolved Copilot review comments on PR #42" in result.output

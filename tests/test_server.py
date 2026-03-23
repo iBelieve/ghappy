@@ -275,7 +275,7 @@ class TestGetClientIp:
         assert _get_client_ip(request) == "unknown"
 
 
-class TestPrCommentsEndpoint:
+class TestLatestCopilotReviewCommentsEndpoint:
     def test_no_open_pr(self, client):
         with patch(
             "ghappy.server.github.get_pr_number_for_branch",
@@ -283,7 +283,7 @@ class TestPrCommentsEndpoint:
             return_value=None,
         ):
             resp = client.get(
-                "/repos/owner/repo/pr-comments?branch=feat",
+                "/repos/owner/repo/latest-copilot-review-comments?branch=feat",
                 headers=AUTH_HEADER,
             )
         assert resp.status_code == 200
@@ -314,7 +314,7 @@ class TestPrCommentsEndpoint:
             ),
         ):
             resp = client.get(
-                "/repos/owner/repo/pr-comments?branch=feat",
+                "/repos/owner/repo/latest-copilot-review-comments?branch=feat",
                 headers=AUTH_HEADER,
             )
         assert resp.status_code == 200
@@ -337,7 +337,7 @@ class TestPrCommentsEndpoint:
             ),
         ):
             resp = client.get(
-                "/repos/owner/repo/pr-comments?branch=feat",
+                "/repos/owner/repo/latest-copilot-review-comments?branch=feat",
                 headers=AUTH_HEADER,
             )
         assert resp.status_code == 200
@@ -347,7 +347,7 @@ class TestPrCommentsEndpoint:
 
     def test_missing_branch_param(self, client):
         resp = client.get(
-            "/repos/owner/repo/pr-comments",
+            "/repos/owner/repo/latest-copilot-review-comments",
             headers=AUTH_HEADER,
         )
         assert resp.status_code == 422
@@ -366,7 +366,7 @@ class TestPrCommentsEndpoint:
             side_effect=exc,
         ):
             resp = client.get(
-                "/repos/owner/repo/pr-comments?branch=feat",
+                "/repos/owner/repo/latest-copilot-review-comments?branch=feat",
                 headers=AUTH_HEADER,
             )
         assert resp.status_code == 404
@@ -392,7 +392,7 @@ class TestPrCommentsEndpoint:
             ),
         ):
             resp = client.get(
-                "/repos/owner/repo/pr-comments?branch=feat",
+                "/repos/owner/repo/latest-copilot-review-comments?branch=feat",
                 headers=AUTH_HEADER,
             )
         assert resp.status_code == 403
@@ -404,7 +404,7 @@ class TestPrCommentsEndpoint:
             side_effect=RuntimeError("oops"),
         ):
             resp = client.get(
-                "/repos/owner/repo/pr-comments?branch=feat",
+                "/repos/owner/repo/latest-copilot-review-comments?branch=feat",
                 headers=AUTH_HEADER,
             )
         assert resp.status_code == 502

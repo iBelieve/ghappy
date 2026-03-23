@@ -170,8 +170,10 @@ async def failed_logs(owner: str, repo: str, run_id: int, request: Request):
     return JSONResponse(content={"logs": logs})
 
 
-@app.get("/repos/{owner}/{repo}/pr-comments")
-async def pr_comments(owner: str, repo: str, branch: str, request: Request):
+@app.get("/repos/{owner}/{repo}/latest-copilot-review-comments")
+async def latest_copilot_review_comments(
+    owner: str, repo: str, branch: str, request: Request
+):
     """Get unresolved Copilot review comments for a PR."""
     github_token = _authenticate(request, owner, repo)
     _log_access(request, owner, repo, f"pr-comments branch={branch}")

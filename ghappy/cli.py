@@ -255,8 +255,8 @@ def view_run_failure(run_id: int):
                 click.echo(f"{job_name}\t{step_label}\t{timestamp} {message}")
 
 
-@cli.command("pr-comments")
-def pr_comments():
+@cli.command("copilot-review")
+def copilot_review():
     """Show unresolved Copilot review comments on the current branch's PR.
 
     Finds the open PR for the current branch and displays any unresolved
@@ -267,7 +267,8 @@ def pr_comments():
     owner, repo_name = repo.split("/", 1)
 
     data = _api_get(
-        f"/repos/{owner}/{repo_name}/pr-comments", params={"branch": branch}
+        f"/repos/{owner}/{repo_name}/latest-copilot-review-comments",
+        params={"branch": branch},
     )
     comments = data.get("comments", [])
     pr_number = data.get("pr_number")
