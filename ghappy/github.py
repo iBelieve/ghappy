@@ -165,9 +165,7 @@ async def get_check_runs(
     seen: dict[str, dict] = {c["name"]: c for c in action_checks}
 
     # Supplement with non-action check runs.
-    non_action_checks = await _get_non_action_check_runs(
-        github_token, owner, repo, ref
-    )
+    non_action_checks = await _get_non_action_check_runs(github_token, owner, repo, ref)
     for check in non_action_checks:
         if check["name"] not in seen:
             seen[check["name"]] = check

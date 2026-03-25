@@ -275,9 +275,7 @@ class TestGetNonActionCheckRuns:
             mock_client_cls.return_value.__aexit__ = AsyncMock(return_value=False)
             mock_client.get = AsyncMock(return_value=mock_response)
 
-            result = await _get_non_action_check_runs(
-                "token", "owner", "repo", "main"
-            )
+            result = await _get_non_action_check_runs("token", "owner", "repo", "main")
 
         assert len(result) == 1
         assert result[0]["name"] == "Test Results"
@@ -322,9 +320,7 @@ class TestGetNonActionCheckRuns:
             mock_client_cls.return_value.__aexit__ = AsyncMock(return_value=False)
             mock_client.get = AsyncMock(return_value=mock_response)
 
-            result = await _get_non_action_check_runs(
-                "token", "owner", "repo", "main"
-            )
+            result = await _get_non_action_check_runs("token", "owner", "repo", "main")
 
         assert len(result) == 1
         assert result[0]["name"] == "Test Results"
@@ -348,9 +344,7 @@ class TestGetNonActionCheckRuns:
             mock_client_cls.return_value.__aexit__ = AsyncMock(return_value=False)
             mock_client.get = AsyncMock(side_effect=exc)
 
-            result = await _get_non_action_check_runs(
-                "token", "owner", "repo", "main"
-            )
+            result = await _get_non_action_check_runs("token", "owner", "repo", "main")
 
         assert result == []
 
@@ -381,9 +375,7 @@ class TestGetNonActionCheckRuns:
             mock_client_cls.return_value.__aexit__ = AsyncMock(return_value=False)
             mock_client.get = AsyncMock(return_value=mock_response)
 
-            result = await _get_non_action_check_runs(
-                "token", "owner", "repo", "main"
-            )
+            result = await _get_non_action_check_runs("token", "owner", "repo", "main")
 
         assert len(result) == 1
         assert result[0]["name"] == "External Check"
