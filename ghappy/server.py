@@ -142,13 +142,26 @@ async def failed_logs(owner: str, repo: str, run_id: int, request: Request):
         try:
             log_text = await github.get_job_log(github_token, owner, repo, job["id"])
         except httpx.HTTPStatusError as exc:
-            logger.exception(
-                "GitHub API error fetching log for %s/%s job=%d",
-                owner,
-                repo,
-                job["id"],
-            )
-            raise _github_http_error(exc)
+            # Some checks (e.g. dorny/test-reporter) create jobs that don't
+            # have downloadable logs, returning 404. Treat client errors as
+            # non-fatal so remaining jobs can still be reported.
+            if 400 <= exc.response.status_code < 500:
+                logger.warning(
+                    "Could not fetch log for %s/%s job=%d (HTTP %d)",
+                    owner,
+                    repo,
+                    job["id"],
+                    exc.response.status_code,
+                )
+                log_text = ""
+            else:
+                logger.exception(
+                    "GitHub API error fetching log for %s/%s job=%d",
+                    owner,
+                    repo,
+                    job["id"],
+                )
+                raise _github_http_error(exc)
         except Exception:
             logger.exception(
                 "GitHub API error fetching log for %s/%s job=%d",

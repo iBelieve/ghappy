@@ -215,6 +215,86 @@ class TestFailedLogsEndpoint:
         data = resp.json()
         assert data["logs"][0]["log"] == ""
 
+    def test_log_fetch_404_returns_empty_log(self, client):
+        """Non-action checks (e.g. dorny/test-reporter) may 404 on log fetch."""
+        jobs = [
+            {
+                "id": 1,
+                "name": "test",
+                "status": "completed",
+                "conclusion": "failure",
+                "steps": [
+                    {
+                        "name": "Run tests",
+                        "status": "completed",
+                        "conclusion": "failure",
+                    }
+                ],
+            }
+        ]
+        mock_request = httpx.Request("GET", "https://api.github.com/test")
+        mock_response = httpx.Response(
+            404, json={"message": "Not Found"}, request=mock_request
+        )
+        exc = httpx.HTTPStatusError(
+            "Not Found", request=mock_request, response=mock_response
+        )
+        with (
+            patch(
+                "ghappy.server.github.get_run_jobs",
+                new_callable=AsyncMock,
+                return_value=jobs,
+            ),
+            patch(
+                "ghappy.server.github.get_job_log",
+                new_callable=AsyncMock,
+                side_effect=exc,
+            ),
+        ):
+            resp = client.get(
+                "/repos/owner/repo/runs/100/failed-logs",
+                headers=AUTH_HEADER,
+            )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert len(data["logs"]) == 1
+        assert data["logs"][0]["log"] == ""
+        assert data["logs"][0]["failed_steps"] == ["Run tests"]
+
+    def test_log_fetch_5xx_still_raises(self, client):
+        """Server errors from log fetch should still propagate."""
+        jobs = [
+            {
+                "id": 1,
+                "name": "test",
+                "status": "completed",
+                "conclusion": "failure",
+                "steps": [],
+            }
+        ]
+        mock_request = httpx.Request("GET", "https://api.github.com/test")
+        mock_response = httpx.Response(500, request=mock_request)
+        exc = httpx.HTTPStatusError(
+            "Server Error", request=mock_request, response=mock_response
+        )
+        with (
+            patch(
+                "ghappy.server.github.get_run_jobs",
+                new_callable=AsyncMock,
+                return_value=jobs,
+            ),
+            patch(
+                "ghappy.server.github.get_job_log",
+                new_callable=AsyncMock,
+                side_effect=exc,
+            ),
+        ):
+            resp = client.get(
+                "/repos/owner/repo/runs/100/failed-logs",
+                headers=AUTH_HEADER,
+            )
+        assert resp.status_code == 502
+
 
 class TestGithubHttpError:
     def test_4xx_error_with_message(self):

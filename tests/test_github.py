@@ -2,10 +2,13 @@
 
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import httpx
 import pytest
 
 from ghappy.github import (
     MAX_LOG_BYTES,
+    _get_action_check_runs,
+    _get_non_action_check_runs,
     _headers,
     download_artifact,
     get_artifacts_for_branch,
@@ -25,7 +28,7 @@ class TestHeaders:
         assert h["X-GitHub-Api-Version"] == "2022-11-28"
 
 
-class TestGetCheckRuns:
+class TestGetActionCheckRuns:
     @pytest.mark.asyncio
     async def test_basic_check_runs(self):
         """Workflow runs API returns runs, jobs are fetched for each."""
@@ -66,7 +69,7 @@ class TestGetCheckRuns:
             mock_client_cls.return_value.__aexit__ = AsyncMock(return_value=False)
             mock_client.get = AsyncMock(return_value=mock_response)
 
-            result = await get_check_runs("token", "owner", "repo", "main")
+            result = await _get_action_check_runs("token", "owner", "repo", "main")
 
         assert len(result) == 1
         assert result[0]["name"] == "lint"
@@ -90,7 +93,7 @@ class TestGetCheckRuns:
             mock_client_cls.return_value.__aexit__ = AsyncMock(return_value=False)
             mock_client.get = AsyncMock(return_value=mock_response)
 
-            result = await get_check_runs("token", "owner", "repo", sha)
+            result = await _get_action_check_runs("token", "owner", "repo", sha)
 
         # Verify head_sha was used in the API call
         call_kwargs = mock_client.get.call_args
@@ -112,7 +115,7 @@ class TestGetCheckRuns:
             mock_client_cls.return_value.__aexit__ = AsyncMock(return_value=False)
             mock_client.get = AsyncMock(return_value=mock_response)
 
-            result = await get_check_runs("token", "owner", "repo", "main")
+            result = await _get_action_check_runs("token", "owner", "repo", "main")
 
         call_kwargs = mock_client.get.call_args
         assert call_kwargs.kwargs["params"]["branch"] == "main"
@@ -158,7 +161,7 @@ class TestGetCheckRuns:
             mock_client_cls.return_value.__aexit__ = AsyncMock(return_value=False)
             mock_client.get = AsyncMock(return_value=mock_response)
 
-            result = await get_check_runs("token", "owner", "repo", "main")
+            result = await _get_action_check_runs("token", "owner", "repo", "main")
 
         # Only the newer run should have its jobs fetched
         mock_get_jobs.assert_called_once_with("token", "owner", "repo", 200)
@@ -219,7 +222,7 @@ class TestGetCheckRuns:
             mock_client_cls.return_value.__aexit__ = AsyncMock(return_value=False)
             mock_client.get = AsyncMock(return_value=mock_response)
 
-            result = await get_check_runs("token", "owner", "repo", "main")
+            result = await _get_action_check_runs("token", "owner", "repo", "main")
 
         # Should have only one entry, from the newer run (id=300)
         assert len(result) == 1
@@ -240,6 +243,289 @@ class TestGetCheckRuns:
             mock_client_cls.return_value.__aexit__ = AsyncMock(return_value=False)
             mock_client.get = AsyncMock(return_value=mock_response)
 
+            result = await _get_action_check_runs("token", "owner", "repo", "main")
+
+        assert result == []
+
+
+class TestGetNonActionCheckRuns:
+    @pytest.mark.asyncio
+    async def test_returns_non_action_checks(self):
+        """Check runs from non-Actions apps are returned."""
+        mock_response = MagicMock()
+        mock_response.raise_for_status = MagicMock()
+        mock_response.json.return_value = {
+            "check_runs": [
+                {
+                    "name": "Test Results",
+                    "status": "completed",
+                    "conclusion": "success",
+                    "id": 500,
+                    "app": {"slug": "test-reporter"},
+                    "details_url": "https://example.com/results",
+                    "started_at": "2024-01-01T00:00:00Z",
+                    "completed_at": "2024-01-01T00:01:00Z",
+                },
+            ]
+        }
+
+        with patch("ghappy.github.httpx.AsyncClient") as mock_client_cls:
+            mock_client = AsyncMock()
+            mock_client_cls.return_value.__aenter__ = AsyncMock(
+                return_value=mock_client
+            )
+            mock_client_cls.return_value.__aexit__ = AsyncMock(return_value=False)
+            mock_client.get = AsyncMock(return_value=mock_response)
+
+            result = await _get_non_action_check_runs("token", "owner", "repo", "main")
+
+        assert len(result) == 1
+        assert result[0]["name"] == "Test Results"
+        assert result[0]["workflow_run_id"] is None
+        assert result[0]["id"] == 500
+
+    @pytest.mark.asyncio
+    async def test_filters_out_github_actions_checks(self):
+        """Check runs from github-actions app are excluded."""
+        mock_response = MagicMock()
+        mock_response.raise_for_status = MagicMock()
+        mock_response.json.return_value = {
+            "check_runs": [
+                {
+                    "name": "lint",
+                    "status": "completed",
+                    "conclusion": "success",
+                    "id": 1,
+                    "app": {"slug": "github-actions"},
+                    "details_url": "",
+                    "started_at": None,
+                    "completed_at": None,
+                },
+                {
+                    "name": "Test Results",
+                    "status": "completed",
+                    "conclusion": "success",
+                    "id": 500,
+                    "app": {"slug": "test-reporter"},
+                    "details_url": "",
+                    "started_at": None,
+                    "completed_at": None,
+                },
+            ]
+        }
+
+        with patch("ghappy.github.httpx.AsyncClient") as mock_client_cls:
+            mock_client = AsyncMock()
+            mock_client_cls.return_value.__aenter__ = AsyncMock(
+                return_value=mock_client
+            )
+            mock_client_cls.return_value.__aexit__ = AsyncMock(return_value=False)
+            mock_client.get = AsyncMock(return_value=mock_response)
+
+            result = await _get_non_action_check_runs("token", "owner", "repo", "main")
+
+        assert len(result) == 1
+        assert result[0]["name"] == "Test Results"
+
+    @pytest.mark.asyncio
+    async def test_graceful_on_403(self):
+        """Returns empty list when Checks API returns 403 (no permission)."""
+        mock_request = httpx.Request("GET", "https://api.github.com/test")
+        mock_resp = httpx.Response(
+            403, json={"message": "Forbidden"}, request=mock_request
+        )
+        exc = httpx.HTTPStatusError(
+            "Forbidden", request=mock_request, response=mock_resp
+        )
+
+        with patch("ghappy.github.httpx.AsyncClient") as mock_client_cls:
+            mock_client = AsyncMock()
+            mock_client_cls.return_value.__aenter__ = AsyncMock(
+                return_value=mock_client
+            )
+            mock_client_cls.return_value.__aexit__ = AsyncMock(return_value=False)
+            mock_client.get = AsyncMock(side_effect=exc)
+
+            result = await _get_non_action_check_runs("token", "owner", "repo", "main")
+
+        assert result == []
+
+    @pytest.mark.asyncio
+    async def test_handles_missing_app_field(self):
+        """Check runs without an app field are included."""
+        mock_response = MagicMock()
+        mock_response.raise_for_status = MagicMock()
+        mock_response.json.return_value = {
+            "check_runs": [
+                {
+                    "name": "External Check",
+                    "status": "completed",
+                    "conclusion": "success",
+                    "id": 600,
+                    "details_url": "",
+                    "started_at": None,
+                    "completed_at": None,
+                },
+            ]
+        }
+
+        with patch("ghappy.github.httpx.AsyncClient") as mock_client_cls:
+            mock_client = AsyncMock()
+            mock_client_cls.return_value.__aenter__ = AsyncMock(
+                return_value=mock_client
+            )
+            mock_client_cls.return_value.__aexit__ = AsyncMock(return_value=False)
+            mock_client.get = AsyncMock(return_value=mock_response)
+
+            result = await _get_non_action_check_runs("token", "owner", "repo", "main")
+
+        assert len(result) == 1
+        assert result[0]["name"] == "External Check"
+
+
+class TestGetCheckRuns:
+    @pytest.mark.asyncio
+    async def test_merges_action_and_non_action_checks(self):
+        """get_check_runs combines both sources, action checks take priority."""
+        action_checks = [
+            {
+                "name": "lint",
+                "status": "completed",
+                "conclusion": "success",
+                "id": 1,
+                "workflow_run_id": 100,
+                "details_url": "",
+                "started_at": None,
+                "completed_at": None,
+            }
+        ]
+        non_action_checks = [
+            {
+                "name": "Test Results",
+                "status": "completed",
+                "conclusion": "success",
+                "id": 500,
+                "workflow_run_id": None,
+                "details_url": "",
+                "started_at": None,
+                "completed_at": None,
+            }
+        ]
+
+        with (
+            patch(
+                "ghappy.github._get_action_check_runs",
+                new_callable=AsyncMock,
+                return_value=action_checks,
+            ),
+            patch(
+                "ghappy.github._get_non_action_check_runs",
+                new_callable=AsyncMock,
+                return_value=non_action_checks,
+            ),
+        ):
+            result = await get_check_runs("token", "owner", "repo", "main")
+
+        names = {r["name"] for r in result}
+        assert names == {"lint", "Test Results"}
+        lint = next(r for r in result if r["name"] == "lint")
+        assert lint["workflow_run_id"] == 100
+        test_results = next(r for r in result if r["name"] == "Test Results")
+        assert test_results["workflow_run_id"] is None
+
+    @pytest.mark.asyncio
+    async def test_action_checks_take_priority_on_name_collision(self):
+        """When both APIs return a check with the same name, action wins."""
+        action_checks = [
+            {
+                "name": "build",
+                "status": "completed",
+                "conclusion": "success",
+                "id": 1,
+                "workflow_run_id": 100,
+                "details_url": "",
+                "started_at": None,
+                "completed_at": None,
+            }
+        ]
+        non_action_checks = [
+            {
+                "name": "build",
+                "status": "completed",
+                "conclusion": "failure",
+                "id": 999,
+                "workflow_run_id": None,
+                "details_url": "",
+                "started_at": None,
+                "completed_at": None,
+            }
+        ]
+
+        with (
+            patch(
+                "ghappy.github._get_action_check_runs",
+                new_callable=AsyncMock,
+                return_value=action_checks,
+            ),
+            patch(
+                "ghappy.github._get_non_action_check_runs",
+                new_callable=AsyncMock,
+                return_value=non_action_checks,
+            ),
+        ):
+            result = await get_check_runs("token", "owner", "repo", "main")
+
+        assert len(result) == 1
+        assert result[0]["workflow_run_id"] == 100
+        assert result[0]["conclusion"] == "success"
+
+    @pytest.mark.asyncio
+    async def test_non_action_checks_only(self):
+        """When there are no action checks, non-action checks are returned."""
+        non_action_checks = [
+            {
+                "name": "Test Results",
+                "status": "completed",
+                "conclusion": "success",
+                "id": 500,
+                "workflow_run_id": None,
+                "details_url": "",
+                "started_at": None,
+                "completed_at": None,
+            }
+        ]
+
+        with (
+            patch(
+                "ghappy.github._get_action_check_runs",
+                new_callable=AsyncMock,
+                return_value=[],
+            ),
+            patch(
+                "ghappy.github._get_non_action_check_runs",
+                new_callable=AsyncMock,
+                return_value=non_action_checks,
+            ),
+        ):
+            result = await get_check_runs("token", "owner", "repo", "main")
+
+        assert len(result) == 1
+        assert result[0]["name"] == "Test Results"
+
+    @pytest.mark.asyncio
+    async def test_empty_from_both_sources(self):
+        with (
+            patch(
+                "ghappy.github._get_action_check_runs",
+                new_callable=AsyncMock,
+                return_value=[],
+            ),
+            patch(
+                "ghappy.github._get_non_action_check_runs",
+                new_callable=AsyncMock,
+                return_value=[],
+            ),
+        ):
             result = await get_check_runs("token", "owner", "repo", "main")
 
         assert result == []
