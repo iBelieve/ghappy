@@ -347,3 +347,104 @@ class TestCopilotReview:
 
         assert result.exit_code == 0
         assert "No unresolved Copilot review comments on PR #42" in result.output
+
+
+class TestListPrArtifacts:
+    def test_with_artifacts(self):
+        runner = CliRunner()
+        data = {
+            "artifacts": [
+                {"id": 1, "name": "build-output", "size_in_bytes": 1048576},
+                {"id": 2, "name": "test-results", "size_in_bytes": 512},
+            ]
+        }
+        with (
+            patch("ghappy.cli._detect_repo", return_value="owner/repo"),
+            patch("ghappy.cli._detect_branch", return_value="main"),
+            patch("ghappy.cli._api_get", return_value=data),
+        ):
+            result = runner.invoke(cli, ["list-pr-artifacts"])
+
+        assert result.exit_code == 0
+        assert "build-output" in result.output
+        assert "test-results" in result.output
+        assert "1.0 MB" in result.output
+
+    def test_no_artifacts(self):
+        runner = CliRunner()
+        data = {"artifacts": []}
+        with (
+            patch("ghappy.cli._detect_repo", return_value="owner/repo"),
+            patch("ghappy.cli._detect_branch", return_value="main"),
+            patch("ghappy.cli._api_get", return_value=data),
+        ):
+            result = runner.invoke(cli, ["list-pr-artifacts"])
+
+        assert result.exit_code == 0
+        assert "No artifacts found" in result.output
+
+
+class TestDownloadPrArtifact:
+    def test_downloads_by_name(self, tmp_path):
+        runner = CliRunner()
+        list_data = {
+            "artifacts": [
+                {"id": 42, "name": "build-output", "size_in_bytes": 100},
+            ]
+        }
+        zip_content = b"PK\x03\x04fake-zip"
+        out_file = str(tmp_path / "build-output.zip")
+
+        with (
+            patch("ghappy.cli._detect_repo", return_value="owner/repo"),
+            patch("ghappy.cli._detect_branch", return_value="main"),
+            patch("ghappy.cli._api_get", return_value=list_data),
+            patch("ghappy.cli._api_get_bytes", return_value=zip_content),
+        ):
+            result = runner.invoke(
+                cli, ["download-pr-artifact", "build-output", "-o", out_file]
+            )
+
+        assert result.exit_code == 0
+        assert "Saved to" in result.output
+        with open(out_file, "rb") as f:
+            assert f.read() == zip_content
+
+    def test_artifact_not_found(self):
+        runner = CliRunner()
+        list_data = {
+            "artifacts": [
+                {"id": 1, "name": "other-artifact", "size_in_bytes": 100},
+            ]
+        }
+        with (
+            patch("ghappy.cli._detect_repo", return_value="owner/repo"),
+            patch("ghappy.cli._detect_branch", return_value="main"),
+            patch("ghappy.cli._api_get", return_value=list_data),
+        ):
+            result = runner.invoke(cli, ["download-pr-artifact", "nonexistent"])
+
+        assert result.exit_code == 1
+        assert "No artifact named 'nonexistent' found" in result.output
+        assert "other-artifact" in result.output
+
+    def test_default_output_filename(self, tmp_path, monkeypatch):
+        runner = CliRunner()
+        list_data = {
+            "artifacts": [
+                {"id": 42, "name": "results", "size_in_bytes": 50},
+            ]
+        }
+        zip_content = b"PK\x03\x04data"
+        monkeypatch.chdir(tmp_path)
+
+        with (
+            patch("ghappy.cli._detect_repo", return_value="owner/repo"),
+            patch("ghappy.cli._detect_branch", return_value="main"),
+            patch("ghappy.cli._api_get", return_value=list_data),
+            patch("ghappy.cli._api_get_bytes", return_value=zip_content),
+        ):
+            result = runner.invoke(cli, ["download-pr-artifact", "results"])
+
+        assert result.exit_code == 0
+        assert "Saved to results.zip" in result.output

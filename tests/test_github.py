@@ -7,6 +7,8 @@ import pytest
 from ghappy.github import (
     MAX_LOG_BYTES,
     _headers,
+    download_artifact,
+    get_artifacts_for_branch,
     get_check_runs,
     get_job_log,
     get_pr_number_for_branch,
@@ -576,6 +578,133 @@ class TestGetUnresolvedCopilotComments:
 
             with pytest.raises(RuntimeError, match="GraphQL error"):
                 await get_unresolved_copilot_comments("token", "owner", "repo", 1)
+
+
+class TestGetArtifactsForBranch:
+    @pytest.mark.asyncio
+    async def test_returns_artifacts(self):
+        """Artifacts are collected from workflow runs for the latest commit."""
+        runs_response = MagicMock()
+        runs_response.raise_for_status = MagicMock()
+        runs_response.json.return_value = {
+            "workflow_runs": [{"id": 100, "head_sha": "abc123"}]
+        }
+
+        artifacts_response = MagicMock()
+        artifacts_response.raise_for_status = MagicMock()
+        artifacts_response.json.return_value = {
+            "artifacts": [
+                {
+                    "id": 1,
+                    "name": "build-output",
+                    "size_in_bytes": 1024,
+                    "created_at": "2024-01-01T00:00:00Z",
+                    "expires_at": "2024-02-01T00:00:00Z",
+                }
+            ]
+        }
+
+        with patch("ghappy.github.httpx.AsyncClient") as mock_client_cls:
+            mock_client = AsyncMock()
+            mock_client_cls.return_value.__aenter__ = AsyncMock(
+                return_value=mock_client
+            )
+            mock_client_cls.return_value.__aexit__ = AsyncMock(return_value=False)
+            mock_client.get = AsyncMock(side_effect=[runs_response, artifacts_response])
+
+            result = await get_artifacts_for_branch("token", "owner", "repo", "main")
+
+        assert len(result) == 1
+        assert result[0]["name"] == "build-output"
+        assert result[0]["id"] == 1
+        assert result[0]["size_in_bytes"] == 1024
+        assert result[0]["workflow_run_id"] == 100
+
+    @pytest.mark.asyncio
+    async def test_no_workflow_runs(self):
+        mock_response = MagicMock()
+        mock_response.raise_for_status = MagicMock()
+        mock_response.json.return_value = {"workflow_runs": []}
+
+        with patch("ghappy.github.httpx.AsyncClient") as mock_client_cls:
+            mock_client = AsyncMock()
+            mock_client_cls.return_value.__aenter__ = AsyncMock(
+                return_value=mock_client
+            )
+            mock_client_cls.return_value.__aexit__ = AsyncMock(return_value=False)
+            mock_client.get = AsyncMock(return_value=mock_response)
+
+            result = await get_artifacts_for_branch("token", "owner", "repo", "main")
+
+        assert result == []
+
+    @pytest.mark.asyncio
+    async def test_filters_to_latest_commit(self):
+        """Only artifacts from runs with the latest head_sha are returned."""
+        runs_response = MagicMock()
+        runs_response.raise_for_status = MagicMock()
+        runs_response.json.return_value = {
+            "workflow_runs": [
+                {"id": 200, "head_sha": "newer"},
+                {"id": 100, "head_sha": "older"},
+            ]
+        }
+
+        artifacts_response = MagicMock()
+        artifacts_response.raise_for_status = MagicMock()
+        artifacts_response.json.return_value = {
+            "artifacts": [
+                {
+                    "id": 5,
+                    "name": "test-results",
+                    "size_in_bytes": 512,
+                    "created_at": "2024-01-01T00:00:00Z",
+                    "expires_at": "2024-02-01T00:00:00Z",
+                }
+            ]
+        }
+
+        with patch("ghappy.github.httpx.AsyncClient") as mock_client_cls:
+            mock_client = AsyncMock()
+            mock_client_cls.return_value.__aenter__ = AsyncMock(
+                return_value=mock_client
+            )
+            mock_client_cls.return_value.__aexit__ = AsyncMock(return_value=False)
+            mock_client.get = AsyncMock(side_effect=[runs_response, artifacts_response])
+
+            result = await get_artifacts_for_branch("token", "owner", "repo", "main")
+
+        assert len(result) == 1
+        # Only run 200 (newer) should have artifacts fetched — verify via the
+        # artifact URL requested.
+        art_call = mock_client.get.call_args_list[1]
+        assert "/runs/200/artifacts" in art_call.args[0]
+
+
+class TestDownloadArtifact:
+    @pytest.mark.asyncio
+    async def test_downloads_zip(self):
+        zip_bytes = b"PK\x03\x04fake-zip-content"
+
+        mock_response = MagicMock()
+        mock_response.raise_for_status = MagicMock()
+        mock_response.aiter_bytes = lambda: _async_iter([zip_bytes])
+
+        mock_stream_ctx = AsyncMock()
+        mock_stream_ctx.__aenter__ = AsyncMock(return_value=mock_response)
+        mock_stream_ctx.__aexit__ = AsyncMock(return_value=False)
+
+        with patch("ghappy.github.httpx.AsyncClient") as mock_client_cls:
+            mock_client = AsyncMock()
+            mock_client_cls.return_value.__aenter__ = AsyncMock(
+                return_value=mock_client
+            )
+            mock_client_cls.return_value.__aexit__ = AsyncMock(return_value=False)
+            mock_client.stream = MagicMock(return_value=mock_stream_ctx)
+
+            result = await download_artifact("token", "owner", "repo", 42)
+
+        assert result == zip_bytes
 
 
 async def _async_iter(items):

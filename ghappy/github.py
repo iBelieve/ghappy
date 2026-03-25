@@ -250,6 +250,81 @@ async def get_unresolved_copilot_comments(
     return result
 
 
+async def get_artifacts_for_branch(
+    github_token: str, owner: str, repo: str, branch: str
+) -> list[dict]:
+    """Get artifacts from the latest workflow runs on a branch.
+
+    Finds the most recent commit's workflow runs and returns all artifacts
+    across those runs. Returns a list of artifact dicts with: id, name,
+    size_in_bytes, created_at, expires_at, workflow_run_id.
+    """
+    # Fetch workflow runs for the branch.
+    url = f"{GITHUB_API}/repos/{owner}/{repo}/actions/runs"
+    params: dict[str, str | int] = {"branch": branch, "per_page": 100}
+
+    async with httpx.AsyncClient(timeout=REQUEST_TIMEOUT) as client:
+        resp = await client.get(url, headers=_headers(github_token), params=params)
+        resp.raise_for_status()
+        data = resp.json()
+        workflow_runs = data.get("workflow_runs", [])
+
+    if not workflow_runs:
+        return []
+
+    # Keep only runs for the latest commit.
+    latest_sha = workflow_runs[0]["head_sha"]
+    current_runs = [r for r in workflow_runs if r["head_sha"] == latest_sha]
+
+    # Fetch artifacts for each workflow run.
+    all_artifacts: list[dict] = []
+    async with httpx.AsyncClient(timeout=REQUEST_TIMEOUT) as client:
+        for wf_run in current_runs:
+            run_id = wf_run["id"]
+            art_url = (
+                f"{GITHUB_API}/repos/{owner}/{repo}/actions/runs/{run_id}/artifacts"
+            )
+            resp = await client.get(
+                art_url, headers=_headers(github_token), params={"per_page": 100}
+            )
+            resp.raise_for_status()
+            artifacts = resp.json().get("artifacts", [])
+            for art in artifacts:
+                all_artifacts.append(
+                    {
+                        "id": art["id"],
+                        "name": art["name"],
+                        "size_in_bytes": art["size_in_bytes"],
+                        "created_at": art.get("created_at"),
+                        "expires_at": art.get("expires_at"),
+                        "workflow_run_id": run_id,
+                    }
+                )
+
+    return all_artifacts
+
+
+async def download_artifact(
+    github_token: str, owner: str, repo: str, artifact_id: int
+) -> bytes:
+    """Download an artifact as a zip archive.
+
+    Returns the raw zip bytes.
+    """
+    url = f"{GITHUB_API}/repos/{owner}/{repo}/actions/artifacts/{artifact_id}/zip"
+
+    async with httpx.AsyncClient(
+        follow_redirects=True, timeout=REQUEST_TIMEOUT
+    ) as client:
+        async with client.stream("GET", url, headers=_headers(github_token)) as resp:
+            resp.raise_for_status()
+            chunks = []
+            async for chunk in resp.aiter_bytes():
+                chunks.append(chunk)
+
+    return b"".join(chunks)
+
+
 async def get_job_log(github_token: str, owner: str, repo: str, job_id: int) -> str:
     """Download logs for a specific job.
 

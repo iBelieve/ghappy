@@ -6,7 +6,7 @@ import re
 
 import httpx
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 
 from . import github
 from .config import Config, load_config
@@ -220,6 +220,66 @@ async def latest_copilot_review_comments(
         raise HTTPException(status_code=502, detail="GitHub API error")
 
     return JSONResponse(content={"comments": comments, "pr_number": pr_number})
+
+
+@app.get("/repos/{owner}/{repo}/artifacts")
+async def list_artifacts(owner: str, repo: str, branch: str, request: Request):
+    """List artifacts from the latest workflow runs on a branch."""
+    github_token = _authenticate(request, owner, repo)
+    _log_access(request, owner, repo, f"artifacts branch={branch}")
+    try:
+        artifacts = await github.get_artifacts_for_branch(
+            github_token, owner, repo, branch
+        )
+    except httpx.HTTPStatusError as exc:
+        logger.exception(
+            "GitHub API error fetching artifacts for %s/%s branch=%s",
+            owner,
+            repo,
+            branch,
+        )
+        raise _github_http_error(exc)
+    except Exception:
+        logger.exception(
+            "GitHub API error fetching artifacts for %s/%s branch=%s",
+            owner,
+            repo,
+            branch,
+        )
+        raise HTTPException(status_code=502, detail="GitHub API error")
+    return JSONResponse(content={"artifacts": artifacts})
+
+
+@app.get("/repos/{owner}/{repo}/artifacts/{artifact_id}/download")
+async def download_artifact(owner: str, repo: str, artifact_id: int, request: Request):
+    """Download an artifact zip file."""
+    github_token = _authenticate(request, owner, repo)
+    _log_access(request, owner, repo, f"download-artifact id={artifact_id}")
+    try:
+        data = await github.download_artifact(github_token, owner, repo, artifact_id)
+    except httpx.HTTPStatusError as exc:
+        logger.exception(
+            "GitHub API error downloading artifact %d for %s/%s",
+            artifact_id,
+            owner,
+            repo,
+        )
+        raise _github_http_error(exc)
+    except Exception:
+        logger.exception(
+            "GitHub API error downloading artifact %d for %s/%s",
+            artifact_id,
+            owner,
+            repo,
+        )
+        raise HTTPException(status_code=502, detail="GitHub API error")
+    return Response(
+        content=data,
+        media_type="application/zip",
+        headers={
+            "Content-Disposition": f"attachment; filename=artifact-{artifact_id}.zip"
+        },
+    )
 
 
 def main():

@@ -100,6 +100,30 @@ def _api_get(path: str, params: dict | None = None) -> dict:
     return resp.json()
 
 
+def _api_get_bytes(path: str, params: dict | None = None) -> bytes:
+    """Make an authenticated GET request and return raw bytes."""
+    base_url = _get_env("GHAPPY_API_URL").rstrip("/")
+    api_key = _get_env("GHAPPY_API_KEY")
+
+    resp = httpx.get(
+        f"{base_url}{path}",
+        params=params,
+        headers={"Authorization": f"Bearer {api_key}"},
+        timeout=120,
+    )
+
+    if resp.status_code >= 400:
+        detail = resp.text
+        if resp.headers.get("content-type", "").startswith("application/json"):
+            body = resp.json()
+            raw = body.get("detail", resp.text)
+            detail = raw.get("detail", resp.text) if isinstance(raw, dict) else raw
+        click.echo(f"Error: API returned {resp.status_code}: {detail}", err=True)
+        sys.exit(1)
+
+    return resp.content
+
+
 def _display_status(status: str, conclusion: str | None) -> str:
     """Return a display string for a check run's status."""
     if status != "completed":
@@ -300,6 +324,88 @@ def copilot_review():
         click.echo(f"--- {location}")
         click.echo(comment.get("body", "").rstrip())
         click.echo()
+
+
+def _humanize_bytes(size: int) -> str:
+    """Format a byte count as a human-readable string."""
+    n = float(size)
+    for unit in ("B", "KB", "MB", "GB"):
+        if n < 1024:
+            return f"{n:.0f} {unit}" if unit == "B" else f"{n:.1f} {unit}"
+        n /= 1024
+    return f"{n:.1f} TB"
+
+
+@cli.command("list-pr-artifacts")
+def list_pr_artifacts():
+    """List artifacts from the latest workflow runs on the current branch's PR."""
+    repo = _detect_repo()
+    branch = _detect_branch()
+    owner, repo_name = repo.split("/", 1)
+
+    data = _api_get(f"/repos/{owner}/{repo_name}/artifacts", params={"branch": branch})
+    artifacts = data.get("artifacts", [])
+
+    if not artifacts:
+        click.echo("No artifacts found.")
+        return
+
+    name_width = max(len(a["name"]) for a in artifacts)
+    name_width = max(name_width, len("NAME"))
+    size_width = 10
+
+    click.echo(f"{'NAME':<{name_width}}  {'SIZE':>{size_width}}  ID")
+    click.echo(f"{'─' * name_width}  {'─' * size_width}  {'─' * 11}")
+
+    for artifact in sorted(artifacts, key=lambda a: a["name"]):
+        size = _humanize_bytes(artifact["size_in_bytes"])
+        click.echo(
+            f"{artifact['name']:<{name_width}}  {size:>{size_width}}  {artifact['id']}"
+        )
+
+
+@cli.command("download-pr-artifact")
+@click.argument("name")
+@click.option(
+    "--output", "-o", default=None, help="Output file path (default: <name>.zip)."
+)
+def download_pr_artifact(name: str, output: str | None):
+    """Download a PR artifact by name.
+
+    Lists artifacts for the current branch and downloads the one matching NAME.
+    """
+    repo = _detect_repo()
+    branch = _detect_branch()
+    owner, repo_name = repo.split("/", 1)
+
+    data = _api_get(f"/repos/{owner}/{repo_name}/artifacts", params={"branch": branch})
+    artifacts = data.get("artifacts", [])
+
+    match = None
+    for artifact in artifacts:
+        if artifact["name"] == name:
+            match = artifact
+            break
+
+    if match is None:
+        available = [a["name"] for a in artifacts]
+        click.echo(f"Error: No artifact named '{name}' found.", err=True)
+        if available:
+            click.echo(f"Available artifacts: {', '.join(sorted(available))}", err=True)
+        sys.exit(1)
+
+    artifact_id = match["id"]
+    out_path = output or f"{name}.zip"
+
+    click.echo(f"Downloading '{name}' ({_humanize_bytes(match['size_in_bytes'])})...")
+    content = _api_get_bytes(
+        f"/repos/{owner}/{repo_name}/artifacts/{artifact_id}/download"
+    )
+
+    with open(out_path, "wb") as f:
+        f.write(content)
+
+    click.echo(f"Saved to {out_path}")
 
 
 if __name__ == "__main__":
