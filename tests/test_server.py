@@ -410,6 +410,109 @@ class TestLatestCopilotReviewCommentsEndpoint:
         assert resp.status_code == 502
 
 
+class TestListArtifactsEndpoint:
+    def test_success(self, client):
+        mock_artifacts = [{"id": 1, "name": "build-output", "size_in_bytes": 1024}]
+        with patch(
+            "ghappy.server.github.get_artifacts_for_branch",
+            new_callable=AsyncMock,
+            return_value=mock_artifacts,
+        ):
+            resp = client.get(
+                "/repos/owner/repo/artifacts?branch=main",
+                headers=AUTH_HEADER,
+            )
+        assert resp.status_code == 200
+        assert resp.json() == {"artifacts": mock_artifacts}
+
+    def test_missing_branch_param(self, client):
+        resp = client.get(
+            "/repos/owner/repo/artifacts",
+            headers=AUTH_HEADER,
+        )
+        assert resp.status_code == 422
+
+    def test_github_http_error(self, client):
+        mock_request = httpx.Request("GET", "https://api.github.com/test")
+        mock_response = httpx.Response(
+            404, json={"message": "Not Found"}, request=mock_request
+        )
+        exc = httpx.HTTPStatusError(
+            "Not Found", request=mock_request, response=mock_response
+        )
+        with patch(
+            "ghappy.server.github.get_artifacts_for_branch",
+            new_callable=AsyncMock,
+            side_effect=exc,
+        ):
+            resp = client.get(
+                "/repos/owner/repo/artifacts?branch=main",
+                headers=AUTH_HEADER,
+            )
+        assert resp.status_code == 404
+
+    def test_generic_error(self, client):
+        with patch(
+            "ghappy.server.github.get_artifacts_for_branch",
+            new_callable=AsyncMock,
+            side_effect=RuntimeError("oops"),
+        ):
+            resp = client.get(
+                "/repos/owner/repo/artifacts?branch=main",
+                headers=AUTH_HEADER,
+            )
+        assert resp.status_code == 502
+
+
+class TestDownloadArtifactEndpoint:
+    def test_success(self, client):
+        zip_data = b"PK\x03\x04fake-zip"
+        with patch(
+            "ghappy.server.github.download_artifact",
+            new_callable=AsyncMock,
+            return_value=zip_data,
+        ):
+            resp = client.get(
+                "/repos/owner/repo/artifacts/42/download",
+                headers=AUTH_HEADER,
+            )
+        assert resp.status_code == 200
+        assert resp.content == zip_data
+        assert resp.headers["content-type"] == "application/zip"
+        assert "attachment" in resp.headers["content-disposition"]
+
+    def test_github_http_error(self, client):
+        mock_request = httpx.Request("GET", "https://api.github.com/test")
+        mock_response = httpx.Response(
+            410, json={"message": "Gone"}, request=mock_request
+        )
+        exc = httpx.HTTPStatusError(
+            "Gone", request=mock_request, response=mock_response
+        )
+        with patch(
+            "ghappy.server.github.download_artifact",
+            new_callable=AsyncMock,
+            side_effect=exc,
+        ):
+            resp = client.get(
+                "/repos/owner/repo/artifacts/42/download",
+                headers=AUTH_HEADER,
+            )
+        assert resp.status_code == 410
+
+    def test_generic_error(self, client):
+        with patch(
+            "ghappy.server.github.download_artifact",
+            new_callable=AsyncMock,
+            side_effect=RuntimeError("oops"),
+        ):
+            resp = client.get(
+                "/repos/owner/repo/artifacts/42/download",
+                headers=AUTH_HEADER,
+            )
+        assert resp.status_code == 502
+
+
 def _make_request(headers=None, client_host: str | None = "127.0.0.1"):
     """Create a minimal mock Request."""
     from unittest.mock import MagicMock
