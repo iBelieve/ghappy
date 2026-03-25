@@ -365,39 +365,24 @@ def list_pr_artifacts():
 
 
 @cli.command("download-pr-artifact")
-@click.argument("name")
+@click.argument("artifact_id", type=int)
 @click.option(
-    "--output", "-o", default=None, help="Output file path (default: <name>.zip)."
+    "--output",
+    "-o",
+    default=None,
+    help="Output file path (default: artifact-<id>.zip).",
 )
-def download_pr_artifact(name: str, output: str | None):
-    """Download a PR artifact by name.
+def download_pr_artifact(artifact_id: int, output: str | None):
+    """Download a PR artifact by its ID.
 
-    Lists artifacts for the current branch and downloads the one matching NAME.
+    Use list-pr-artifacts to find artifact IDs.
     """
     repo = _detect_repo()
-    branch = _detect_branch()
     owner, repo_name = repo.split("/", 1)
 
-    data = _api_get(f"/repos/{owner}/{repo_name}/artifacts", params={"branch": branch})
-    artifacts = data.get("artifacts", [])
+    out_path = output or f"artifact-{artifact_id}.zip"
 
-    match = None
-    for artifact in artifacts:
-        if artifact["name"] == name:
-            match = artifact
-            break
-
-    if match is None:
-        available = [a["name"] for a in artifacts]
-        click.echo(f"Error: No artifact named '{name}' found.", err=True)
-        if available:
-            click.echo(f"Available artifacts: {', '.join(sorted(available))}", err=True)
-        sys.exit(1)
-
-    artifact_id = match["id"]
-    out_path = output or f"{name}.zip"
-
-    click.echo(f"Downloading '{name}' ({_humanize_bytes(match['size_in_bytes'])})...")
+    click.echo(f"Downloading artifact {artifact_id}...")
     content = _api_get_bytes(
         f"/repos/{owner}/{repo_name}/artifacts/{artifact_id}/download"
     )
