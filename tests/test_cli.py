@@ -69,7 +69,7 @@ class TestWatchPrChecks:
                     "conclusion": "success",
                     "id": 1,
                     "workflow_run_id": 100,
-                }
+                },
             ]
         }
         with (
@@ -152,6 +152,42 @@ class TestWatchPrChecks:
         assert result.exit_code == 0
         assert "in_progress" in result.output
         assert "All checks were successful" in result.output
+
+    def test_non_action_check_shows_dash_for_run_id(self):
+        """Non-action checks (no workflow_run_id) show '-' in the RUN column."""
+        runner = CliRunner()
+        check_runs = {
+            "check_runs": [
+                {
+                    "name": "lint",
+                    "status": "completed",
+                    "conclusion": "success",
+                    "id": 1,
+                    "workflow_run_id": 100,
+                },
+                {
+                    "name": "Test Results",
+                    "status": "completed",
+                    "conclusion": "success",
+                    "id": 500,
+                    "workflow_run_id": None,
+                },
+            ]
+        }
+        with (
+            patch("ghappy.cli._detect_repo", return_value="owner/repo"),
+            patch("ghappy.cli._detect_branch", return_value="main"),
+            patch("ghappy.cli._api_get", return_value=check_runs),
+        ):
+            result = runner.invoke(cli, ["watch-pr-checks"])
+
+        assert result.exit_code == 0
+        assert "100" in result.output
+        # Non-action check should show "-" instead of a run ID
+        lines = result.output.splitlines()
+        test_results_line = [line for line in lines if "Test Results" in line]
+        assert len(test_results_line) == 1
+        assert test_results_line[0].rstrip().endswith("-")
 
 
 class TestViewRunFailure:

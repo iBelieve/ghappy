@@ -1,5 +1,6 @@
 """GitHub API client for server-side use."""
 
+import logging
 import re
 
 import httpx
@@ -8,6 +9,8 @@ GITHUB_API = "https://api.github.com"
 REQUEST_TIMEOUT = 30
 MAX_PAGES = 10
 MAX_LOG_BYTES = 5 * 1024 * 1024  # 5 MB
+
+logger = logging.getLogger("ghappy")
 
 
 def _headers(github_token: str) -> dict[str, str]:
@@ -18,16 +21,12 @@ def _headers(github_token: str) -> dict[str, str]:
     }
 
 
-async def get_check_runs(
+async def _get_action_check_runs(
     github_token: str, owner: str, repo: str, ref: str
 ) -> list[dict]:
-    """Get check runs for a git reference (branch, tag, or SHA).
+    """Get check runs from GitHub Actions workflow runs and jobs.
 
-    Uses the GitHub Actions workflow runs and jobs APIs instead of the
-    checks API, since fine-grained PATs don't support the checks API.
-
-    Returns a list of check run dicts with: name, status, conclusion, id,
-    workflow_run_id, details_url, started_at, completed_at.
+    Returns a list of check run dicts with workflow_run_id set.
     """
     # Use head_sha for full SHAs, branch name otherwise.
     if re.fullmatch(r"[0-9a-fA-F]{40}", ref):
@@ -71,6 +70,108 @@ async def get_check_runs(
                     "started_at": job.get("started_at"),
                     "completed_at": job.get("completed_at"),
                 }
+    return list(seen.values())
+
+
+async def _get_non_action_check_runs(
+    github_token: str, owner: str, repo: str, ref: str
+) -> list[dict]:
+    """Get non-Actions check runs from the Checks API.
+
+    Queries the check runs API and filters out check runs created by
+    GitHub Actions (app slug "github-actions"), since those are already
+    covered by the workflow runs API with richer data (workflow_run_id).
+
+    Returns a list of check run dicts without workflow_run_id.
+    Returns an empty list if the API is inaccessible (e.g. token lacks
+    checks:read permission).
+    """
+    url = f"{GITHUB_API}/repos/{owner}/{repo}/commits/{ref}/check-runs"
+    all_check_runs: list[dict] = []
+
+    try:
+        async with httpx.AsyncClient(timeout=REQUEST_TIMEOUT) as client:
+            page = 1
+            while page <= MAX_PAGES:
+                resp = await client.get(
+                    url,
+                    headers=_headers(github_token),
+                    params={"per_page": 100, "page": page},
+                )
+                resp.raise_for_status()
+                data = resp.json()
+                check_runs = data.get("check_runs", [])
+                all_check_runs.extend(check_runs)
+                if len(check_runs) < 100:
+                    break
+                page += 1
+    except httpx.HTTPStatusError as exc:
+        # Gracefully handle permission errors — the token may lack
+        # checks:read (common with fine-grained PATs).
+        if 400 <= exc.response.status_code < 500:
+            logger.debug(
+                "Checks API returned %d for %s/%s ref=%s, skipping non-action checks",
+                exc.response.status_code,
+                owner,
+                repo,
+                ref,
+            )
+            return []
+        raise
+
+    # Filter out GitHub Actions check runs (already covered by workflow runs API).
+    result = []
+    for cr in all_check_runs:
+        app_slug = (cr.get("app") or {}).get("slug", "")
+        if app_slug == "github-actions":
+            continue
+        result.append(
+            {
+                "name": cr["name"],
+                "status": cr["status"],
+                "conclusion": cr.get("conclusion"),
+                "id": cr["id"],
+                "workflow_run_id": None,
+                "details_url": cr.get("details_url") or cr.get("html_url", ""),
+                "started_at": cr.get("started_at"),
+                "completed_at": cr.get("completed_at"),
+            }
+        )
+    return result
+
+
+async def get_check_runs(
+    github_token: str, owner: str, repo: str, ref: str
+) -> list[dict]:
+    """Get check runs for a git reference (branch, tag, or SHA).
+
+    Combines results from two sources:
+    1. GitHub Actions workflow runs/jobs API — provides workflow_run_id for
+       log access.
+    2. GitHub Checks API — picks up non-Actions check runs (e.g.
+       dorny/test-reporter, external CI systems). These won't have
+       workflow_run_id since they don't have downloadable action logs.
+
+    If the Checks API is inaccessible (e.g. token lacks checks:read),
+    only action-based checks are returned.
+
+    Returns a list of check run dicts with: name, status, conclusion, id,
+    workflow_run_id (None for non-action checks), details_url, started_at,
+    completed_at.
+    """
+    action_checks = await _get_action_check_runs(github_token, owner, repo, ref)
+
+    # Build the result from action checks first (they have workflow_run_id).
+    seen: dict[str, dict] = {c["name"]: c for c in action_checks}
+
+    # Supplement with non-action check runs.
+    non_action_checks = await _get_non_action_check_runs(
+        github_token, owner, repo, ref
+    )
+    for check in non_action_checks:
+        if check["name"] not in seen:
+            seen[check["name"]] = check
+
     return list(seen.values())
 
 

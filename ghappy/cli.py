@@ -174,8 +174,10 @@ def watch_pr_checks(interval: int):
 
         for run in sorted(runs, key=lambda r: r["name"]):
             status_text = _display_status(run["status"], run["conclusion"])
-            # Prefer workflow run ID (usable with view-run-failure) over check run ID.
-            display_id = str(run.get("workflow_run_id") or run["id"])
+            # Show workflow run ID (usable with view-run-failure) when available.
+            # Non-action checks (e.g. dorny/test-reporter) won't have one.
+            wf_run_id = run.get("workflow_run_id")
+            display_id = str(wf_run_id) if wf_run_id else "-"
             name = run["name"]
 
             previous = prev_status.get(name)
